@@ -1,0 +1,48 @@
+# Costruire una classe immutabile
+
+La ricetta classica (regole di Bloch, *Effective Java*):
+
+1. La classe è `final` (o tutti i costruttori sono privati con factory).
+2. Tutti i campi sono `private final`.
+3. Nessun setter, nessun metodo che modifichi lo stato.
+4. **Defensive copy** in input e in output per i campi che riferiscono oggetti mutabili.
+
+```java
+public final class Period {
+    private final Date start;
+    private final Date end;
+
+    public Period(Date start, Date end) {
+        if (start.after(end)) throw new IllegalArgumentException();
+        // defensive copy: il chiamante non può cambiare il nostro stato dopo
+        this.start = new Date(start.getTime());
+        this.end   = new Date(end.getTime());
+    }
+
+    public Date getStart() {
+        return new Date(start.getTime());  // mai esporre il riferimento interno
+    }
+}
+```
+
+## Record (Java 16+)
+
+I `record` sono immutabili by-design e generano automaticamente costruttore,
+accessor, `equals`, `hashCode`, `toString`:
+
+```java
+public record Period(LocalDate start, LocalDate end) {
+    public Period {
+        if (start.isAfter(end)) throw new IllegalArgumentException();
+    }
+}
+```
+
+> ⚠️ Un record può comunque "contenere" oggetti mutabili. `record Cart(List<Item> items)` è
+> *shallow immutable*: la lista interna è la stessa istanza passata.
+
+## Collezioni immutabili
+
+- `List.of(...)`, `Set.of(...)`, `Map.of(...)` → veramente immutabili.
+- `Collections.unmodifiableList(list)` → wrapper read-only, ma se qualcuno mantiene il
+  riferimento alla lista originale può ancora modificarla.

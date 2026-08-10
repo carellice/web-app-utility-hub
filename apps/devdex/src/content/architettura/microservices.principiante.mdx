@@ -1,0 +1,41 @@
+# Microservizi — Le basi
+
+Un sistema a **microservizi** è una raccolta di servizi:
+
+- **Piccoli** e focalizzati su una capability di business.
+- **Autonomi**: ognuno ha il suo codice, il suo DB, il suo deploy.
+- Comunicano via rete: HTTP/REST, gRPC, code di messaggi.
+
+```text
+[ Web ] → [ Auth ] → [ Orders ] → [ Payments ]
+                           ↘  [ Notifications ]
+```
+
+## Perché farlo?
+
+- **Scalabilità indipendente**: il servizio "search" scala diversamente da "checkout".
+- **Indipendenza dei team**: un team possiede un servizio end-to-end (Conway's law).
+- **Tecnologie eterogenee**: usare il giusto strumento per ogni problema.
+- **Deploy frequenti**: rilasciare uno solo non blocca gli altri.
+
+## Perché NON farlo (subito)
+
+- Complessità operativa: monitoring, tracing, deploy, networking.
+- Transazioni distribuite (saga, eventual consistency).
+- Latency: ogni call è rete.
+- Costi infrastrutturali.
+
+Regola di Sam Newman: **"Don't start with microservices"**. Comincia con un monolite
+modulare, e splitta solo quando hai un dolore concreto.
+
+## Comunicazione
+
+- **Sincrona** (REST/gRPC): semplice, ma accoppia disponibilità.
+- **Asincrona** (Kafka, RabbitMQ, SQS): più resiliente, ma più complessa (idempotenza,
+  ordine).
+
+## Microservizi ≠ "tanti piccoli servizi"
+
+Se 5 servizi vanno deployati sempre insieme e condividono DB → hai un **distributed
+monolith**: peggio di un monolite, perché paghi i costi di rete senza i benefici di
+indipendenza.

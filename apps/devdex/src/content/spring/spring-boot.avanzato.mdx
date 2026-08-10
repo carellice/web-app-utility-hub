@@ -1,0 +1,67 @@
+# Spring Boot — Chicche e ottimizzazioni
+
+## Diagnostica auto-config
+
+```bash
+mvn spring-boot:run -Dspring-boot.run.arguments=--debug
+```
+
+Stampa un *Conditions Evaluation Report*: quali auto-config sono state attivate, quali
+no e **perché** (quale condizione è fallita).
+
+In modo programmatico:
+
+```java
+public static void main(String[] args) {
+    SpringApplication.run(App.class, args)
+        .getBean(ConditionEvaluationReport.class)
+        .getConditionAndOutcomesBySource()
+        .forEach((k, v) -> System.out.println(k + " -> " + v));
+}
+```
+
+## AOT + Native (Spring 6 / Boot 3)
+
+Spring 6 produce *AOT processing*: analizza il contesto a build time e genera codice
+sorgente che sostituisce reflection/proxy a runtime. Combinato con GraalVM, fa partire
+l'app in 50–100 ms come binario nativo.
+
+```bash
+./mvnw -Pnative native:compile
+```
+
+> ⚠️ Le librerie che usano reflection runtime devono avere `reflect-config.json`
+> oppure dichiarare hints via `RuntimeHintsRegistrar`.
+
+## Startup time tips
+
+- `spring.main.lazy-initialization=true` → istanzia tutti i bean lazy. Utile in dev,
+  rischioso in prod (gli errori si manifestano alla prima richiesta).
+- `spring.jmx.enabled=false` se non usi JMX.
+- Dipendenze "starter" inutilizzate sono il primo killer dello startup. `mvn dependency:tree`
+  e taglia.
+
+## Actuator: endpoint operativi
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+```
+
+Espone `/actuator/health`, `/actuator/metrics`, e con Micrometer pushi su Prometheus,
+Datadog, ecc. **Mai esporre tutti** in produzione: `/heapdump`, `/env`, `/threaddump`
+sono sensibili.
+
+## Configuration metadata
+
+In `META-INF/spring-configuration-metadata.json` puoi documentare le tue properties
+così IntelliJ ti dà autocompletion e tipi.
+
+## Quirks del classpath
+
+Boot usa `META-INF/spring.factories` (≤ 2.x) o `AutoConfiguration.imports` (3.x) per
+discovery. Un JAR sbagliato che ridichiara `DataSourceAutoConfiguration` può far
+esplodere il contesto in modi creativi. `--debug` salva la vita.

@@ -1,0 +1,157 @@
+# JDBC vs Hibernate — Avanzato e performance
+
+## Persistence Context: che cos'è davvero
+
+La Persistence Context è una `Map<EntityKey, Object>` che Hibernate mantiene per la
+sessione corrente. Operazioni:
+
+- `find()` cerca prima nel context, poi nel DB.
+- `persist()` registra l'entity come "managed".
+- `flush()` confronta stato attuale e snapshot, genera SQL.
+
+Implicazioni:
+
+- **L'entity tornata da una query è managed**: modifiche vengono persisted al flush.
+- **Detached** se la sessione si chiude: `em.merge()` per "ri-attaccare".
+
+## First-level cache vs Second-level cache
+
+| Livello | Scope | Default |
+|---|---|---|
+| 1° | Per Session/Tx | sempre attivo |
+| 2° | Tra Session, intero JVM | opt-in (Ehcache, Caffeine, Hazelcast) |
+
+```java
+@Entity
+@Cacheable
+@org.hibernate.annotations.Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
+public class Country { ... }
+```
+
+Trappola: cache distribuita su 2nd-level richiede invalidation cluster-aware. Spesso
+è meglio una Redis cache esplicita.
+
+## Hibernate Statistics
+
+```java
+SessionFactoryImplementor sf = ((SessionFactoryImplementor) emf);
+sf.getStatistics().setStatisticsEnabled(true);
+log.info("Queries: {}", sf.getStatistics().getQueryCount());
+```
+
+Espone:
+- Numero query/entità caricate.
+- Cache hit rate.
+- Connessione tempo.
+Utile in dev/test per scoprire N+1.
+
+## Datasource e connection pool
+
+HikariCP (default in Spring Boot) è ottimo. Tuning chiave:
+
+```yaml
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 5000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 30000
+```
+
+Numero pool: regola di Brendan Gregg: `connections = (core_count * 2) + effective_spindle_count`.
+Per app moderne: 10-30 è il range tipico. Più alto = più lock e context switch al DB.
+
+## Prepared statement caching
+
+JDBC PreparedStatement: caching lato driver + lato DB. HikariCP non li cacha, ma il
+driver Postgres sì (`prepareThreshold=5`: dopo 5 esecuzioni viene server-side
+prepared).
+
+In MySQL: server-side prepared statement disabilitato di default per evitare
+problemi con plan cache. Per ON: `useServerPrepStmts=true`.
+
+## Hibernate vs jOOQ vs MyBatis (performance)
+
+In benchmark sintetici (1000 select):
+
+- JDBC raw: 100% baseline.
+- jOOQ / MyBatis: 105-110% (10% overhead).
+- Hibernate (read-only, no cache): 130-180% (overhead persistence context + proxy).
+- Hibernate (con N+1): 1000%+ (catastrofico).
+
+L'80% dei problemi Hibernate in prod = N+1.
+
+## Read-only optimization
+
+```java
+@Transactional(readOnly = true)
+public List<User> list() { ... }
+```
+
+Hibernate:
+- Disabilita il dirty checking.
+- In alcuni DB segnala read-only → percorsi più rapidi.
+- Spring Data: imposta `FlushMode.MANUAL`.
+
+## Stream large result
+
+```java
+@Query("SELECT u FROM User u")
+Stream<User> streamAll();
+```
+
+Hibernate apre un cursor. Va consumato dentro la transazione e chiuso:
+
+```java
+try (Stream<User> users = repo.streamAll()) {
+    users.forEach(this::process);
+}
+```
+
+Senza questo, carichi tutto in memoria → OOM.
+
+## Pitfall: equals/hashCode su entity
+
+L'`@Id` può essere `null` prima del persist. Usare `id` in `equals/hashCode` rompe il
+contratto durante la transizione "new → managed".
+
+Pattern: usa un *business key* immutabile (es. `email`) o uno `UUID` generato in app.
+
+## Custom dialect / type
+
+Per tipi non-standard (JSONB Postgres):
+
+```java
+@Type(JsonBinaryType.class)
+@Column(columnDefinition = "jsonb")
+private Map<String, Object> metadata;
+```
+
+Hibernate 6 ha tipi nativi per JSON, array, range. Hibernate 5 richiedeva
+`hibernate-types-x` (terza parte).
+
+## JPA Criteria API
+
+Per query dinamiche tipate:
+
+```java
+CriteriaBuilder cb = em.getCriteriaBuilder();
+CriteriaQuery<User> q = cb.createQuery(User.class);
+Root<User> r = q.from(User.class);
+q.select(r).where(cb.equal(r.get("active"), true));
+List<User> users = em.createQuery(q).getResultList();
+```
+
+Verbose. Alternative: QueryDSL, Specifications (Spring Data).
+
+## Domande tipiche al colloquio
+
+- *"N+1: cosa è e come si risolve?"*
+- *"Cosa fa il dirty checking di Hibernate?"*
+- *"Cache di primo vs secondo livello: quando uso quale?"*
+- *"Pessimistic vs optimistic locking?"*
+- *"Quando passeresti da JPA a jOOQ/JdbcTemplate?"*
+- *"Equals/hashCode su entity: trappole?"*

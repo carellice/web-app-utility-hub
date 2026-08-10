@@ -1,0 +1,153 @@
+# DI — Internals and optimizations
+
+## How Spring builds the container (simplified)
+
+1. **Bean definition scanning**: `@ComponentScan`, `@Configuration`,
+   auto-config. Result: a `name -> BeanDefinition` map (class, scope, dependsOn,
+   init/destroy).
+2. **BeanFactoryPostProcessor**: post processors can modify definitions before
+   creation (e.g. property placeholder resolution).
+3. **BeanPostProcessor**: hooked into each bean's creation, they see the
+   instance before/after initialization (e.g.
+   `AnnotationAwareAspectJAutoProxyCreator` creates AOP proxies,
+   `CommonAnnotationBeanPostProcessor` handles `@PostConstruct`).
+4. **Eager instantiation** of singletons.
+
+## Proxies: when and why
+
+To support AOP (`@Transactional`, `@Async`, `@Cacheable`), Spring creates
+proxies:
+
+- **JDK dynamic proxy** if the bean implements at least one interface.
+- **CGLIB** if it is a concrete class with no interfaces.
+- Spring 6+ can use **Spring Native** + AOT to pre-generate proxies.
+
+Implications:
+
+- Proxy-aware methods (`@Transactional`, `@Async`) require external invocation
+  (no self-invocation).
+- CGLIB requires the class to NOT be `final`, same for methods.
+
+## Startup performance
+
+For fast startups:
+
+- Global **lazy initialization**: `spring.main.lazy-initialization=true`.
+- `@Configuration(proxyBeanMethods = false)`.
+- Minimize classpath (unused starters = extra scanning).
+- **AOT processing** (Spring 6) eliminates runtime reflection.
+- `native` profile: GraalVM compiles everything AOT.
+
+## Programmatic registration
+
+For advanced scenarios (plugin loaders, dynamic features):
+
+```java
+@Configuration
+public class Plugins implements BeanDefinitionRegistryPostProcessor {
+    @Override
+    public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry r) {
+        for (var plugin : discoverPlugins()) {
+            r.registerBeanDefinition(plugin.name(),
+                BeanDefinitionBuilder.genericBeanDefinition(plugin.type()).getBeanDefinition());
+        }
+    }
+    @Override
+    public void postProcessBeanFactory(ConfigurableListableBeanFactory f) {}
+}
+```
+
+## DependsOn order
+
+```java
+@Bean @DependsOn("flyway") public DataSource ds() { ... }
+```
+
+Forces the order when there is no direct constructor dependency (e.g. side
+initializations).
+
+## SmartLifecycle
+
+For beans that must start/stop outside the normal lifecycle (Kafka listener,
+scheduler):
+
+```java
+@Component
+public class MyConsumer implements SmartLifecycle {
+    public void start() { /* start polling */ }
+    public void stop()  { /* graceful shutdown */ }
+    public boolean isRunning() { ... }
+    public int getPhase() { return Integer.MIN_VALUE; }   // before/after others
+}
+```
+
+## @Autowired on collections: order
+
+`List<Strategy>` is injected according to:
+
+1. Explicit `@Order` or `Ordered` interface.
+2. Naturally "natural order" of the bean factory (usually by definition).
+
+> 💡 Never assume an "implicit" order: declare it with `@Order(N)`.
+
+## ApplicationContext events
+
+```java
+@EventListener
+public void onReady(ApplicationReadyEvent e) {
+    metrics.recordStartup(System.currentTimeMillis());
+}
+```
+
+Built-in events: `ContextRefreshedEvent`, `ApplicationReadyEvent`,
+`ContextClosedEvent`, `PayloadApplicationEvent<T>`.
+
+## Service locator anti-pattern
+
+```java
+// ⚠️ active lookup: breaks IoC
+class Foo {
+    public void run() {
+        Bar bar = SpringContextHolder.getBean(Bar.class);
+    }
+}
+```
+
+Use only where DI is impossible (e.g. classes instantiated by external
+frameworks).
+
+## Tests: no Spring unless needed
+
+```java
+@Test
+void calculatesTax() {
+    var prices = mock(PriceRepo.class);
+    when(prices.find("X")).thenReturn(BigDecimal.TEN);
+    var svc = new OrderService(prices, Clock.fixed(...));
+    assertEquals(BigDecimal.ONE, svc.tax("X"));
+}
+```
+
+Pure unit tests are 100× faster than `@SpringBootTest`. Use Spring only for
+integration tests.
+
+## Traps
+
+- **Self-injection** as a workaround for proxy self-invocation: it works but
+  it is a *code smell*; better split into two beans.
+- **Field injection** makes the class unusable outside the container.
+- **Injecting `ApplicationContext`** is a service locator: avoid.
+- **Prototype bean inside a singleton**: without `ObjectProvider`, you always
+  get the same instance.
+
+## Typical interview questions
+
+- *"Constructor vs field injection?"* — testability, immutability.
+- *"What does `@Configuration` proxyBeanMethods = false do?"* — lite mode, no
+  CGLIB.
+- *"What happens with two beans of the same type? How do you disambiguate?"*
+  — `@Primary`, `@Qualifier`.
+- *"BeanPostProcessor vs BeanFactoryPostProcessor?"* — runtime instances vs
+  definitions.
+- *"How would you handle plugins loaded at runtime?"* —
+  `BeanDefinitionRegistryPostProcessor`.

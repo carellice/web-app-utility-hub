@@ -1,0 +1,96 @@
+# Dependency Injection — The basics
+
+**Inversion of Control (IoC)**: instead of creating your dependencies, you
+receive them.
+**Dependency Injection (DI)** is the concrete technique to implement IoC.
+
+```java
+// Without DI: the class creates its dependencies
+public class OrderService {
+    private final PriceRepo prices = new PriceRepo();   // tight coupling
+}
+
+// With DI: it receives them as parameters
+public class OrderService {
+    private final PriceRepo prices;
+    public OrderService(PriceRepo prices) { this.prices = prices; }
+}
+```
+
+Who creates the `PriceRepo` instance and passes it in? The **container**
+(Spring, CDI, Guice…).
+
+## Three injection styles
+
+```java
+// 1) Constructor injection (recommended)
+@Service
+public class OrderService {
+    private final PriceRepo prices;
+    public OrderService(PriceRepo prices) { this.prices = prices; }
+}
+
+// 2) Setter injection
+@Service
+public class OrderService {
+    private PriceRepo prices;
+    @Autowired public void setPrices(PriceRepo prices) { this.prices = prices; }
+}
+
+// 3) Field injection (discouraged)
+@Service
+public class OrderService {
+    @Autowired private PriceRepo prices;
+}
+```
+
+Why prefer constructor injection:
+
+- Fields can be `final` → immutable.
+- Required dependencies are **explicit** (you cannot instantiate without
+  them).
+- Unit tests don't need Spring: pass mocks to the constructor.
+- No NPE from a forgotten `@Autowired`.
+
+## Bean and Component
+
+In Spring, a "bean" is an object managed by the container. You declare it
+like this:
+
+```java
+@Component                       // generic
+@Service                         // semantic: business logic
+@Repository                      // semantic: data access
+@RestController @Controller      // semantic: web layer
+@Configuration
+public class AppConfig {
+    @Bean
+    public Clock clock() { return Clock.systemUTC(); }
+}
+```
+
+`@Component` and friends → scanned by `@ComponentScan`. `@Bean` → methods on
+`@Configuration` classes that return the instance to register.
+
+## Automatic resolution
+
+```java
+public OrderService(PriceRepo prices, Clock clock) { ... }
+```
+
+Spring inspects the parameters, finds a compatible bean for each type and
+passes them in. If there are 2 of the same type: `@Qualifier("name")` to
+disambiguate.
+
+## Lifecycle
+
+- `@PostConstruct` → called after dependencies are injected.
+- `@PreDestroy` → called before the bean is destroyed.
+
+```java
+@Service
+public class CachedRepo {
+    @PostConstruct void warmup() { /* load cache */ }
+    @PreDestroy   void shutdown() { /* flush, close */ }
+}
+```

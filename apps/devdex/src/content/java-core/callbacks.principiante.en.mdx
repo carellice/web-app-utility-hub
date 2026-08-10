@@ -1,0 +1,70 @@
+# Callback patterns
+
+A **callback** is a function you pass to another so that it can be invoked
+later (typically when something is "ready").
+
+```java
+public class Button {
+    private Runnable onClick;
+    public void onClick(Runnable r) { this.onClick = r; }
+    public void simulateClick() { if (onClick != null) onClick.run(); }
+}
+
+Button b = new Button();
+b.onClick(() -> System.out.println("clicked!"));
+b.simulateClick();
+```
+
+## Callback shapes in Java
+
+1. **Functional interface** (Java 8+): `Runnable`, `Consumer<T>`,
+   `Function<T,R>`, `BiConsumer<T,U>`, `Supplier<T>`.
+2. Classic **Listener / Observer**: an interface with one or more methods.
+3. **SAM** (Single Abstract Method) compatible with lambdas.
+
+```java
+public interface DownloadListener {
+    void onSuccess(File file);
+    void onError(Throwable t);
+}
+```
+
+## Example: async download
+
+```java
+public void download(URL url, DownloadListener l) {
+    new Thread(() -> {
+        try {
+            File f = downloadSync(url);
+            l.onSuccess(f);
+        } catch (Throwable t) {
+            l.onError(t);
+        }
+    }).start();
+}
+```
+
+## Pros
+
+- Simple mental model: "when it finishes, call this function".
+- Decouples the initiator from the final action.
+
+## Cons
+
+- **Pyramid of doom** (callback hell) when actions chain.
+- Hard to handle errors uniformly.
+- Hard to cancel.
+
+```java
+auth(user, token -> {
+    fetchUser(token, u -> {
+        fetchCart(u, c -> {
+            checkout(u, c, r -> {
+                send(r, ok -> {
+                    log.info("done");   // ⛰️ pyramid
+                });
+            });
+        });
+    });
+});
+```

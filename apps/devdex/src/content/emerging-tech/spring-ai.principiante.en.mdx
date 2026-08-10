@@ -1,0 +1,52 @@
+# Spring AI & LangChain4j
+
+Two libraries to bring **LLMs** into the JVM.
+
+## Spring AI
+
+A Spring API for chat, embeddings, function calling, RAG.
+
+```java
+@Service
+public class ChatService {
+    private final ChatClient chat;
+
+    public ChatService(ChatClient.Builder b) {
+        this.chat = b.defaultSystem("You are a technical assistant").build();
+    }
+
+    public String ask(String q) {
+        return chat.prompt().user(q).call().content();
+    }
+}
+```
+
+Supported providers: OpenAI, Anthropic, Google Vertex, Azure OpenAI, Ollama
+(local), Bedrock, Mistral. The API is uniform: you change config, not code.
+
+## LangChain4j
+
+The Java port of the LangChain project (Python/JS). More "low-level" and flexible,
+great for assembling complex prompts, tool use and agents.
+
+```java
+ChatLanguageModel model = OpenAiChatModel.builder()
+    .apiKey(key)
+    .modelName("gpt-4o-mini")
+    .build();
+
+String answer = model.generate("What is ACID?");
+```
+
+## What both can do
+
+- **Chat completion** (request/response and streaming).
+- **Embeddings**: turning text into vectors (for similarity search).
+- **RAG**: retrieval + generation.
+- **Function calling / tools**: the LLM decides to call one of your functions.
+- **Structured output**: constraints on the shape of the output JSON.
+
+## When to pick which
+
+- Spring AI if you are already on Spring and want abstraction + auto-config.
+- LangChain4j if you want more control, agent patterns, or you are not on Spring.

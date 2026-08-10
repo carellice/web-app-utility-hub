@@ -1,0 +1,100 @@
+# AOP — Aspect Oriented Programming
+
+**AOP** tackles *cross-cutting concerns*: behaviors that span many classes
+(logging, security, transactions, caching, metrics) without you having to
+repeat them everywhere.
+
+```java
+@Aspect
+@Component
+public class TimingAspect {
+    @Around("execution(* com.example.service..*(..))")
+    public Object timeIt(ProceedingJoinPoint pjp) throws Throwable {
+        long t = System.nanoTime();
+        try {
+            return pjp.proceed();
+        } finally {
+            log.info("{} took {} ns", pjp.getSignature(), System.nanoTime() - t);
+        }
+    }
+}
+```
+
+## Glossary
+
+- **Aspect**: the module that contains the "cross-cutting concern"
+  (`@Aspect`).
+- **JoinPoint**: a point in the program where the aspect can intervene (e.g.
+  a method invocation).
+- **Pointcut**: the expression that selects which joinpoints to intercept.
+- **Advice**: the code to execute (`@Before`, `@After`, `@Around`).
+- **Weaving**: the process of "weaving" aspects into the code
+  (compile-time, load-time, or via a runtime proxy).
+
+## The 5 advice types
+
+```java
+@Before("execution(* save(..))")
+public void log(JoinPoint jp) { log.info("about to call {}", jp); }
+
+@AfterReturning(pointcut = "execution(* find(..))", returning = "ret")
+public void onOk(JoinPoint jp, Object ret) { ... }
+
+@AfterThrowing(pointcut = "execution(* find(..))", throwing = "ex")
+public void onErr(JoinPoint jp, Throwable ex) { ... }
+
+@After("execution(* save(..))")
+public void onAny(JoinPoint jp) { ... }   // finally
+
+@Around("execution(* api..*(..))")
+public Object around(ProceedingJoinPoint pjp) throws Throwable {
+    // before
+    Object out = pjp.proceed();
+    // after
+    return out;
+}
+```
+
+## Typical pointcuts
+
+```java
+execution(public * com.example..*Service.*(..))
+within(com.example.repo..*)
+@annotation(org.springframework.transaction.annotation.Transactional)
+@within(org.springframework.stereotype.Service)
+bean(*Service)
+args(java.lang.String, ..)
+```
+
+Expressions combine with `&&`, `||`, `!`.
+
+## Real example: annotation-driven audit
+
+```java
+@Retention(RUNTIME) @Target(METHOD)
+public @interface Audit { String action(); }
+
+@Aspect @Component
+public class AuditAspect {
+    @AfterReturning("@annotation(audit)")
+    public void log(JoinPoint jp, Audit audit) {
+        auditService.log(audit.action(), jp.getArgs());
+    }
+}
+
+@Service
+public class OrderService {
+    @Audit(action = "ORDER_PLACED")
+    public Order place(NewOrder cmd) { ... }
+}
+```
+
+## When NOT to use it
+
+- For business logic: AOP hides the flow and complicates debugging.
+- For detailed logging: better an MDC + targeted interceptors than scattered
+  AOP.
+- When a direct design (composition + decorator) is enough.
+
+> 💡 AOP is powerful: use it for *truly* cross-cutting concerns (security,
+> telemetry, tx), not for "convenience".

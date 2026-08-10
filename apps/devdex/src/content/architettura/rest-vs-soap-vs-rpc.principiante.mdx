@@ -1,0 +1,57 @@
+# REST vs SOAP vs RPC
+
+I tre stili principali per esporre API in rete.
+
+## REST
+
+- **Risorse** identificate da URI (`/users/42`).
+- **HTTP verbi**: GET (read), POST (create), PUT/PATCH (update), DELETE.
+- **Stateless**: ogni request porta con sé il contesto (auth, parametri).
+- **JSON** in genere (ma agnostico al payload).
+
+```http
+GET /users/42 HTTP/1.1
+Accept: application/json
+```
+
+```json
+{ "id": 42, "name": "Anna" }
+```
+
+## SOAP
+
+Protocollo **basato su XML** con contratto formale `WSDL`. Pesante, ma con feature
+enterprise mature: WS-Security, transazioni distribuite, contratti tipati.
+
+```xml
+<soap:Envelope>
+  <soap:Body>
+    <getUser><id>42</id></getUser>
+  </soap:Body>
+</soap:Envelope>
+```
+
+Lo trovi spesso in banche, assicurazioni, PA: sistemi legacy con regole strette.
+
+## RPC (Remote Procedure Call)
+
+Concettualmente: chiami una **funzione remota** come fosse locale. JSON-RPC, XML-RPC,
+gRPC.
+
+- **gRPC**: usa Protobuf (binario compatto) e HTTP/2. Streaming bidirezionale, codice
+  tipato generato. Lo standard de-facto per comunicazione interna tra microservizi.
+
+```protobuf
+service UserService {
+  rpc GetUser (UserId) returns (User);
+}
+```
+
+## Quando usare cosa?
+
+| Scenario | Scelta |
+|---|---|
+| API pubblica per web/mobile | REST |
+| Comunicazione interna microservizi ad alto throughput | gRPC |
+| Integrazione enterprise/legacy con contratto formale | SOAP |
+| API a query flessibile lato client | GraphQL |

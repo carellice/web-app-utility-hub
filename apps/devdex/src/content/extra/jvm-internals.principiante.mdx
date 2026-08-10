@@ -1,0 +1,98 @@
+# JVM internals — Le basi
+
+La **JVM** (Java Virtual Machine) è la macchina virtuale che esegue il bytecode Java.
+È molto più di un "interprete": include il **classloader**, il **garbage collector**,
+il **JIT compiler**, e una gestione della memoria sofisticata.
+
+## Il viaggio del codice
+
+```
+.java  →  javac  →  .class (bytecode)  →  JVM  →  istruzioni native
+```
+
+`javac` produce bytecode portabile. La JVM lo:
+
+1. **Carica** (ClassLoader).
+2. **Verifica** (bytecode verifier: stack consistente, tipi OK).
+3. **Interpreta** (interpreter): istruzione per istruzione.
+4. **JIT-compila** i metodi caldi → codice nativo, molto più veloce.
+
+## Modello di memoria (semplificato)
+
+```
+┌─────────────────────────────┐
+│         Heap                │   ← oggetti (allocati con new)
+│   ┌────────┐  ┌────────┐    │
+│   │ Young  │  │  Old   │    │
+│   │ (Eden, │  │ (Tenured) │ │
+│   │  S0,S1)│  │        │    │
+│   └────────┘  └────────┘    │
+├─────────────────────────────┤
+│       Metaspace             │   ← classi caricate (era PermGen pre-Java 8)
+├─────────────────────────────┤
+│   Stack (per-thread)        │   ← variabili locali, call frame
+└─────────────────────────────┘
+```
+
+### Heap
+
+- Tutti gli oggetti vivono qui.
+- Diviso in generazioni: **Young** (Eden + due Survivor), **Old**.
+- Il GC promuove gli oggetti sopravvissuti da Young a Old.
+
+### Stack
+
+- Una per thread.
+- Tiene i call frame: parametri, variabili locali, return address.
+- I tipi primitivi locali vivono qui; i riferimenti agli oggetti sono qui ma puntano alla heap.
+
+### Metaspace
+
+- Memoria nativa (non heap).
+- Classi caricate, costanti, metadata.
+- Dal Java 8, sostituisce il vecchio PermGen.
+
+## Garbage Collector in 30 secondi
+
+Il GC libera gli oggetti non più raggiungibili. Strategia base:
+
+1. **Allocazione**: nuovo oggetto → Eden.
+2. **Minor GC**: quando Eden si riempie, copia gli oggetti vivi in Survivor.
+3. **Maggior eventuale GC**: gli oggetti vecchi (sopravvissuti a molti GC minor) vanno
+   in Old.
+4. **Major / Full GC**: pulizia Old, più costosa.
+
+GC moderni (G1, ZGC, Shenandoah) cercano di mantenere pause sotto millisecondi.
+
+## Comandi utili
+
+```bash
+java -Xms512m -Xmx2g -XX:+UseG1GC MyApp
+```
+
+- `-Xms`: heap iniziale.
+- `-Xmx`: heap massimo.
+- `-XX:+UseG1GC`: GC G1 (default da Java 9).
+
+```bash
+jcmd <pid> GC.heap_info
+jcmd <pid> Thread.print
+```
+
+`jcmd` è il "swiss knife" diagnostico.
+
+## ClassLoader
+
+Le classi vengono caricate **lazy**, al primo uso. Gerarchia:
+
+```
+Bootstrap CL  (java.*)
+   ↓
+Platform CL   (javax.*, modules)
+   ↓
+Application CL  (il tuo classpath)
+   ↓
+Custom CL     (plugin, webapp, OSGi)
+```
+
+I caricamenti sono *delegati al genitore* prima del proprio classpath: niente conflitti tra `java.lang.String` "tuo" e quello reale.

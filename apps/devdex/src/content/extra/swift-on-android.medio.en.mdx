@@ -1,0 +1,52 @@
+# Swift on Android — Setup and bridging
+
+## Toolchain
+
+There are community projects (see Readdle's *swift-android-toolchain* or the
+unofficial forks) that package:
+
+- Swift compiler cross-compiled for `aarch64-linux-android`,
+  `armv7-linux-android`, etc.
+- The ported Swift standard libraries (Dispatch, partial Foundation).
+- The Android NDK headers.
+
+```bash
+swiftc \
+  -sdk $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/.../sysroot \
+  -target aarch64-unknown-linux-android24 \
+  -emit-library -o libmycore.so mycore.swift
+```
+
+## Exposing APIs to Java
+
+Swift on Android exposes `@_cdecl` functions with the C calling convention, then
+Java/Kotlin calls them via **JNI**:
+
+```swift
+@_cdecl("Java_com_example_Lib_sum")
+public func sum(_ env: OpaquePointer, _ clazz: OpaquePointer,
+                _ a: Int32, _ b: Int32) -> Int32 {
+    return a + b
+}
+```
+
+```java
+public class Lib {
+    static { System.loadLibrary("mycore"); }
+    public static native int sum(int a, int b);
+}
+```
+
+## Practical limitations
+
+- `URLSession`, the high-level iOS networking, **is not** fully available.
+- Replace with `libcurl` or do networking from the Java side.
+- No UIKit / SwiftUI (obvious, iOS-only).
+- Large build size: the Swift stdlib must be shipped.
+
+## Modern alternatives
+
+- **Kotlin Multiplatform** (KMP): shares code across iOS, Android, Web, JVM.
+- **Flutter**: Dart, native UI rendered via Skia/Impeller.
+- **React Native** / Expo.
+- **Swift on Server** (Vapor, Hummingbird) on the backend, and *not* on Android.

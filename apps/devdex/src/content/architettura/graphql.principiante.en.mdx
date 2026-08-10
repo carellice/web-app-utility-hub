@@ -1,0 +1,130 @@
+# GraphQL — The basics
+
+**GraphQL** is a query language and a runtime for APIs, originally developed at
+Facebook. Compared to REST:
+
+- A single endpoint (usually `/graphql`, POST).
+- The client tells exactly which fields it wants.
+- Responses are typed by a shared **schema**.
+
+## Schema (SDL)
+
+```graphql
+type User {
+  id: ID!
+  name: String!
+  orders: [Order!]!
+}
+
+type Order {
+  id: ID!
+  total: Float!
+  status: Status!
+}
+
+enum Status { PENDING PAID SHIPPED }
+
+type Query {
+  user(id: ID!): User
+  orders(status: Status): [Order!]!
+}
+
+type Mutation {
+  placeOrder(items: [ID!]!): Order
+}
+```
+
+`!` means "non-null". `[X!]!` = non-null list of non-null X.
+
+## Query
+
+```graphql
+query {
+  user(id: "42") {
+    name
+    orders { id total }
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "user": {
+      "name": "Anna",
+      "orders": [{ "id": "o1", "total": 9.9 }]
+    }
+  }
+}
+```
+
+The client decides the payload **shape**: no over-fetching (useless fields),
+no under-fetching (multiple round-trips).
+
+## Mutation
+
+```graphql
+mutation {
+  placeOrder(items: ["sku-1", "sku-2"]) {
+    id
+    total
+  }
+}
+```
+
+Same syntax as queries, but for side effects.
+
+## Subscription
+
+Server push via WebSocket / SSE:
+
+```graphql
+subscription {
+  orderStatusChanged(userId: "42") {
+    id
+    status
+  }
+}
+```
+
+Useful for realtime UI.
+
+## Resolver
+
+Each schema field has a corresponding **resolver**: a function that produces
+the value.
+
+```java
+@Controller
+public class UserResolver {
+    @QueryMapping
+    public User user(@Argument String id) { return repo.findById(id); }
+
+    @SchemaMapping
+    public List<Order> orders(User user) { return orderRepo.findByUser(user.id()); }
+}
+```
+
+Spring for GraphQL (`spring-boot-starter-graphql`) generates the schema from SDL
+and dispatches to controllers.
+
+## When GraphQL wins
+
+- Heterogeneous frontends (web + mobile) using different data.
+- Composing N backends into a single API (BFF).
+- Shared schema that evolves under control.
+
+## When NOT
+
+- Simple CRUD API → REST is more direct.
+- Trivial HTTP caching → REST leverages native ETags (GraphQL caches at app
+  level).
+- File upload, binary streaming.
+
+## Tooling
+
+- **Apollo Server / Apollo Client**: most common JS stack.
+- **Spring for GraphQL**: official Java/Spring stack.
+- **GraphiQL**: in-browser IDE to explore the schema.

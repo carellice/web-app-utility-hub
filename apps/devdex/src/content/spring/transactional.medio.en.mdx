@@ -1,0 +1,64 @@
+# @Transactional — Propagation & Isolation
+
+## Propagation
+
+What to do if a transaction is **already** active when the method is invoked:
+
+| Value | Behavior |
+|---|---|
+| `REQUIRED` (default) | Joins the existing one, otherwise creates one. |
+| `REQUIRES_NEW` | Suspends the current one, opens a new one (independent commit/rollback). |
+| `NESTED` | Savepoint within the current transaction (requires a driver that supports SAVEPOINT). |
+| `SUPPORTS` | If there is one, joins it; otherwise runs without a tx. |
+| `NOT_SUPPORTED` | Suspends the current tx. |
+| `MANDATORY` | Must have a tx, otherwise `IllegalTransactionStateException`. |
+| `NEVER` | Must not have one. |
+
+Classic use case for `REQUIRES_NEW`: **audit logging**. You want the log to be
+written even if the main transaction rolls back.
+
+```java
+@Transactional(propagation = Propagation.REQUIRES_NEW)
+public void writeAudit(AuditEvent e) { ... }
+```
+
+## Isolation
+
+Mapped to standard SQL levels:
+
+- `READ_UNCOMMITTED`
+- `READ_COMMITTED` (default on many DBs)
+- `REPEATABLE_READ`
+- `SERIALIZABLE`
+
+Trade-off: higher = fewer concurrent phenomena (dirty read, non-repeatable
+read, phantom) but more locking/conflicts.
+
+## Timeout
+
+```java
+@Transactional(timeout = 5)   // seconds
+public void heavyWrite() { ... }
+```
+
+If the DB doesn't respond within 5s, rollback.
+
+## Rollback for checked exceptions
+
+```java
+@Transactional(rollbackFor = IOException.class)
+public void persistFile(...) throws IOException { ... }
+
+@Transactional(noRollbackFor = NotFoundException.class)
+public Foo lookup(...) { ... }
+```
+
+## Lazy loading and LazyInitializationException
+
+A `@Transactional` closes the Hibernate session at the end of the method. If
+you return an entity with lazy relationships and then access them in the
+controller → `LazyInitializationException`. Fixes:
+
+- Return **DTOs** (preferred).
+- `@EntityGraph` or `fetch join` in the query.
+- `Open-Session-In-View` (discouraged).

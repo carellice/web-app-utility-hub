@@ -1,0 +1,70 @@
+# RestTemplate vs WebClient — Under the hood
+
+## Reactive non significa più veloce
+
+Su una **singola richiesta**, WebClient non è più veloce di RestTemplate. Anzi, il costo
+delle astrazioni Reactor lo rende leggermente più lento. Il vantaggio è
+**scalabilità**: non occupare un thread per ogni request consente di gestire migliaia
+di connessioni con pochissimi thread.
+
+```text
+Tomcat thread-per-request:    1 req = 1 thread (default pool ~200)
+Netty event-loop (WebClient): 1 thread → N richieste concorrenti
+```
+
+## Backpressure
+
+In Reactor, il subscriber **chiede** elementi al publisher (`request(n)`): se il
+consumer è lento, il producer non lo soffoca. È critico negli streaming endpoint:
+
+```java
+web.get().uri("/events").retrieve()
+    .bodyToFlux(Event.class)
+    .limitRate(50)
+    .doOnNext(this::process);
+```
+
+## Blocking call dentro WebClient
+
+`.block()` su un thread del pool Netty causa un *BlockingException* in dev (con
+`BlockHound`) o, in prod, congela quel thread. Mai farlo in un controller WebFlux.
+
+In un controller MVC bloccante, è OK:
+
+```java
+public ResponseEntity<User> getUser(@PathVariable long id) {
+    User u = web.get().uri("/users/{id}", id)
+        .retrieve()
+        .bodyToMono(User.class)
+        .block(Duration.ofSeconds(3));   // qui siamo già su thread Tomcat
+    return ResponseEntity.ok(u);
+}
+```
+
+## Path migrazione consigliato (Spring 6+)
+
+1. Sostituisci `RestTemplate` con `RestClient` per codice **blocking**: API simile a
+   WebClient ma sincrona.
+2. Sostituisci `RestTemplate` con `WebClient` solo se hai un caso reattivo vero
+   (WebFlux, streaming, alto fan-out).
+3. Considera `@HttpExchange` (Spring 6) per generare client tipati a partire da
+   un'interfaccia:
+
+```java
+public interface UserApi {
+    @GetExchange("/users/{id}")
+    User get(@PathVariable long id);
+}
+```
+
+## Memory footprint
+
+WebClient + Reactor mantiene buffer Netty in `ByteBuf` pooled. Se non leggi il body
+(`bodyToMono` mai sottoscritto) hai un **memory leak**. Reactor Netty registra warning
+sui leak; configura `LEAK_DETECTION` a `paranoid` in dev.
+
+## DNS caching
+
+La JVM cachea DNS per default (10s+). Sotto Kubernetes, dove i pod cambiano IP, vuoi un
+TTL più basso e/o un DNS resolver custom (Reactor Netty lo permette via
+`HttpClient.resolver(...)`).

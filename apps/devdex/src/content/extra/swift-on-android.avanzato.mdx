@@ -1,0 +1,61 @@
+# Swift su Android — Chicche e stato dell'arte
+
+## Perché tecnicamente funziona
+
+Swift è basato su **LLVM**, esattamente come il compilatore C++ Android. Il compilatore
+Swift può generare codice per qualsiasi target supportato da LLVM, purché la stdlib
+sia portata. L'Android NDK fornisce la libc (`bionic`) verso cui linkare.
+
+## ABI Swift su Android: non c'è
+
+A differenza di iOS, Android non ha una **ABI stabile** Swift garantita: ogni
+applicazione embed la propria stdlib. App Bundle dimezza il problema (ABI per
+architettura), ma resta payload extra.
+
+## Foundation su Android: corelibs-foundation
+
+Esiste **swift-corelibs-foundation**, la port "swift-native" di Foundation per Linux.
+Funziona "abbastanza" su Android, ma mancano:
+
+- `NSURLSession` con configurazioni complete.
+- Localization, NSDate calendar exotics.
+- Alcuni delegate pattern based su Objective-C runtime (assente su Android).
+
+## Concurrency: async/await funziona?
+
+Sì, `async/await` di Swift 5.5+ funziona perché si appoggia a `libdispatch` (GCD) che
+è stato portato. Però:
+
+- `MainActor` mappa su un "main queue" custom: deve essere setup dall'app host.
+- Le performance non sono profilabili con Instruments/Xcode → strumenti Linux generici
+  (perf, eBPF).
+
+## Esempio reale: Readdle
+
+Readdle ha rilasciato Spark Email su Android usando un **core Swift cross-platform**.
+Il loro post tecnico documenta come hanno fatto build, distribution e bridging — è
+l'esempio pubblico più solido che esista.
+
+## Build size
+
+Una libreria Swift "hello world" con Foundation pesa **15–25 MB** per arch. Strategia:
+
+- Strip dei simboli debug.
+- LTO (`-O -wmo`).
+- Compilazione separata per arch e App Bundle Play.
+
+## Quando ha senso oggi nel 2026
+
+- Hai un team grosso che mantiene logica complessa Swift per iOS e vuole zero
+  riscritture.
+- L'app Android è "secondaria": meno traffico, accetti il costo runtime extra.
+- Sei disposto a "ownare" la toolchain.
+
+Per startup / progetti nuovi, **non ci sono ragioni razionali** per scegliere Swift su
+Android — KMP è di gran lunga la scelta ovvia.
+
+## La curiosità che fa colpo
+
+Apple stessa, per anni, ha avuto interesse a tenere Swift "neutrale" come linguaggio
+multi-piattaforma (Server-Side Swift, Foundation portata, Windows toolchain). Swift su
+Android è il "punto debole": tecnicamente possibile, strategicamente non sponsorizzato.

@@ -1,0 +1,73 @@
+# Spring Boot — Auto-configuration e DI
+
+## Auto-configuration
+
+Auto-configuration significa: *"se vedo X nel classpath e l'utente non ha già definito Y,
+configuro Y al posto suo"*.
+
+```java
+@AutoConfiguration
+@ConditionalOnClass(DataSource.class)
+@ConditionalOnMissingBean(DataSource.class)
+public class DataSourceAutoConfiguration { ... }
+```
+
+Le auto-config vengono caricate da
+`META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`
+(da Spring Boot 3; prima era `spring.factories`).
+
+`@ConditionalOnXxx` è la chiave: `@ConditionalOnClass`, `@ConditionalOnMissingBean`,
+`@ConditionalOnProperty`, `@ConditionalOnWebApplication`, ecc.
+
+## Dependency Injection
+
+```java
+@Service
+public class OrderService {
+    private final PriceRepo prices;
+
+    public OrderService(PriceRepo prices) {   // constructor injection (preferita)
+        this.prices = prices;
+    }
+}
+```
+
+Costruttore > setter > field. Motivi:
+
+- I campi sono `final` → immutabili.
+- Test unitari: passi i collaboratori come parametri, non serve framework.
+- Niente NPE da campo `@Autowired` non popolato in test.
+
+## Scope
+
+- `singleton` (default): un'istanza per ApplicationContext.
+- `prototype`: nuova istanza ogni iniezione.
+- `request`, `session`, `application` per web.
+
+## @Lazy
+
+Marca un bean perché sia istanziato **solo al primo uso**, non a startup.
+
+```java
+@Component
+@Lazy
+public class HeavyService { ... }
+```
+
+Utile per:
+
+- Spezzare cicli di dipendenza.
+- Velocizzare lo startup quando un bean è raramente usato.
+
+> ⚠️ `@Lazy` su un bean iniettato in un singleton crea un **proxy**. La prima invocazione
+> sul proxy risolverà il bean.
+
+## DispatcherServlet
+
+È il front-controller di Spring MVC:
+
+1. Riceve la HTTP request.
+2. La passa a un `HandlerMapping` per trovare il controller.
+3. Invoca il `HandlerAdapter`, che chiama il metodo `@RequestMapping`.
+4. Convertitori (Jackson, ecc.) serializzano la risposta.
+5. ViewResolver / response body chiudono il cerchio.

@@ -1,0 +1,58 @@
+# SQL vs NoSQL — Modellazione
+
+## Normalizzare vs denormalizzare
+
+- **SQL**: si tende a *normalizzare* (3NF): ogni fatto in un solo posto, niente
+  duplicazione. JOIN al query time.
+- **NoSQL document**: si tende a *denormalizzare*: i dati che leggi insieme stanno
+  insieme. Velocissimo in lettura, più complesso in scrittura (aggiornare in N posti).
+
+```js
+// MongoDB: un ordine è un documento autonomo
+{
+  _id: "ord_42",
+  user: { id: "u_1", name: "Anna" },     // copiato per evitare il lookup
+  items: [
+    { sku: "ABC", qty: 2, price: 9.90 },
+    { sku: "XYZ", qty: 1, price: 49.00 }
+  ],
+  total: 68.80
+}
+```
+
+## Indici
+
+Concettualmente identici (B-tree, hash, full-text), ma con specificità:
+
+- **Compositi**: rispettano il "leftmost prefix" (vedi avanzato).
+- **Partial index** (Postgres, Mongo): indicizza solo righe che soddisfano un predicato.
+- **TTL index** (Mongo, Cassandra): la riga viene cancellata dopo un timeout.
+- **GIN/GiST** (Postgres): full-text, JSONB, array.
+
+## Schema migration
+
+- SQL: `ALTER TABLE` può lockare. Strumenti: Flyway, Liquibase. Tecniche:
+  expand/contract per zero-downtime.
+- NoSQL document: cambi forma quando vuoi, ma il codice deve sapere gestire **versioni
+  multiple** dello stesso documento (campo `version` esplicito).
+
+## Quando NoSQL "vince" davvero
+
+- Scrittura massiva e linearmente scalabile (es. event-store).
+- Dati gerarchici (CMS, profili).
+- Cache di sessioni / risultati (Redis).
+- Grafi (Neo4j) per social, raccomandazioni.
+- Time series (Influx, Timescale).
+
+## Quando NoSQL "perde" (anche se sembrava ovvio)
+
+- Dati con tante relazioni N-N "vere" (carrelli ↔ prodotti ↔ promo).
+- Reportistica ad-hoc / BI: SQL + un OLAP è imbattibile.
+- Vincoli transazionali tra documenti (Mongo li ha multi-document dal 4.0 ma non
+  scalano come il singolo-doc).
+
+## Postgres come "NoSQL"
+
+`JSONB` di Postgres permette query/indici dentro a JSON. Per molti casi è il *best of
+both worlds*: schema dove serve, JSON dove serve flessibilità. **Considera Postgres
+prima** di introdurre un DB NoSQL nello stack.

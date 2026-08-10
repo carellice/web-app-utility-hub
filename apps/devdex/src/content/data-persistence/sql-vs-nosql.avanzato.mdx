@@ -1,0 +1,92 @@
+# SQL vs NoSQL — Chicche di performance
+
+## Indici compositi e leftmost prefix
+
+Indice su `(country, city, age)`:
+
+| Query | Usa indice? |
+|---|---|
+| `WHERE country='IT'` | ✅ |
+| `WHERE country='IT' AND city='Roma'` | ✅ |
+| `WHERE country='IT' AND age=30` | parziale (solo country, poi filtro) |
+| `WHERE city='Roma'` | ❌ |
+| `WHERE city='Roma' AND age=30` | ❌ |
+
+L'indice è un B-tree ordinato su `(country, city, age)`: per usarlo serve fissare le
+colonne **dalla più a sinistra**.
+
+## Covering index
+
+Un indice è "covering" per una query se contiene **tutte le colonne richieste** (sia
+nel WHERE che nel SELECT). Postgres esegue una *index-only scan* senza toccare la
+heap.
+
+```sql
+CREATE INDEX ON orders (user_id) INCLUDE (total, created_at);
+```
+
+Sotto carico, può fare un fattore 10× sulla latenza.
+
+## Analisi di un piano: EXPLAIN
+
+```sql
+EXPLAIN ANALYZE
+SELECT * FROM orders WHERE user_id = 42 AND status = 'PAID';
+```
+
+Cose da cercare:
+
+- **Seq Scan** su tabelle grandi → manca indice o `OR` ti blocca l'indice.
+- **Nested Loop** con il "loop interno" grande → join hint o riscrittura.
+- **Stime molto distanti da actual rows** → `ANALYZE` non aggiornato, oppure statistiche
+  da affinare con `CREATE STATISTICS`.
+
+## N+1: il classico ORM killer
+
+```java
+for (User u : users) {
+    System.out.println(u.getOrders());   // 1 query per user, N+1 totale
+}
+```
+
+Soluzioni:
+
+- `JOIN FETCH` (JPA) o `@EntityGraph`.
+- Spring Data: progettare la query con DTO projection.
+- jOOQ / SQL puro per query critiche.
+
+## Sharding
+
+Tagliare orizzontalmente una tabella per chiave (es. `user_id % N`).
+
+- SQL: lo fai tu (o tool come Citus per Postgres).
+- NoSQL (Mongo, Cassandra, Dynamo): incluso nel motore, ma devi scegliere bene la
+  **partition key** o paghi caro.
+
+**Hot partition**: se la chiave è sbilanciata (es. `country='US'` 90% del traffico),
+una sola shard fa tutto.
+
+## Soft delete e indici
+
+Aggiungere `WHERE deleted_at IS NULL` ovunque finisce per non usare gli indici esistenti.
+Pattern: usare **partial index**:
+
+```sql
+CREATE INDEX ON orders(user_id) WHERE deleted_at IS NULL;
+```
+
+## NoSQL: write amplification
+
+Cassandra/HBase usano LSM-tree: scritture velocissime (append) ma poi compaction
+periodica. Senza tuning si trasforma in una macchina che fa I/O random "a sorpresa".
+Monitora le compaction.
+
+## Connection pool tuning
+
+| DB | Pool tipico |
+|---|---|
+| Postgres | 10–25 connessioni per app, con PgBouncer davanti |
+| MySQL | simile, profilare con `SHOW PROCESSLIST` |
+| Mongo | driver maxPoolSize ~100 (le connessioni sono leggere) |
+
+Postgres soffre molte connessioni: usa PgBouncer in modalità `transaction`.

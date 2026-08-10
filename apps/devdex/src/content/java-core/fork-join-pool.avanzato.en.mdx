@@ -1,0 +1,124 @@
+# ForkJoinPool — Internals and nuggets
+
+## Work-stealing in detail
+
+Each worker has a **double-ended deque**. Local workers push/pop from the
+"head" side (LIFO). Thieves steal from the "tail" side (FIFO).
+
+```text
+worker A deque:   [t1] [t2] [t3]   ← local push/pop from the right
+worker B (thief)  steals from the left ──┘
+```
+
+This design:
+
+- **Maximizes cache locality**: the worker reworks just-pushed (hot) tasks
+  immediately.
+- **Minimizes contention**: the thief operates from the opposite side.
+- **Balances load** without a central coordinator.
+
+## Submission vs internal tasks
+
+There are 2 queues:
+
+- **Submission queue**: for external tasks (`submit`, `invoke` from non-FJ
+  threads).
+- **Worker deque**: for internal tasks (`fork()`).
+
+Initially, submitted tasks land in global queues, then workers migrate them
+into local deques. Submission queue saturation is the first sign that the
+pool is undersized.
+
+## Thread compensation
+
+`ForkJoinPool` can create **temporary extra threads** to avoid dropping
+below a parallelism level:
+
+- When a worker `join()`s on a task not yet completed and there is no other
+  work.
+- When `ManagedBlocker.block()` is used.
+- When `setMaximumPoolSize` allows it.
+
+The `commonPool` has a default of `availableProcessors() - 1` workers, but
+can grow up to `maxSpares + parallelism` (default 256).
+
+## Bias-pool and historical race conditions
+
+Pre-Java 9 there were known bugs on mixed workloads that could cause
+starvation. From Java 9 onwards the pool is more robust and `ManagedBlocker`
+is integrated with the commonPool.
+
+## Trick: choose the pool with `submit()`
+
+When you fire a `parallelStream()` *inside* a task submitted to a different
+pool, the parallel stream recognizes the context and uses that pool.
+
+```java
+ForkJoinPool custom = new ForkJoinPool(16);
+List<Integer> result = custom.submit(() ->
+    data.parallelStream().filter(predicate).toList()
+).get();
+```
+
+Documented since Java 8 and a widespread technique to isolate heavy
+workloads.
+
+## VarHandle + atomic in compute()
+
+For shared accumulators (rare in FJ tasks because reduction happens at
+join), use `LongAdder` instead of `AtomicLong`: the former is optimized for
+frequent writes across many threads.
+
+## "Silent stall" traps
+
+Symptoms: app slows down, JFR shows all FJ workers in `WAITING` on
+`join()`.
+
+Common causes:
+
+1. **Blocking without ManagedBlocker**: `Thread.sleep`, `connection.read()`.
+2. **Cyclic dependency** between ForkJoin tasks (deadlock).
+3. **commonPool saturation** by another component (abused parallel streams,
+   CompletableFuture without dedicated executor).
+
+Mitigations:
+
+- Never blocking I/O on the commonPool.
+- Dedicated pools per workload type (compute vs IO).
+- Setting `-Djava.util.concurrent.ForkJoinPool.common.maximumSpares=256`
+  (default).
+
+## CountedCompleter
+
+For non-trivial fan-out tasks. Example: map over graph nodes. Allows
+fine-grained notifications to the parent. More powerful but more verbose,
+used by the Streams framework.
+
+## Comparison with Executors
+
+| | `Executors.newFixedThreadPool` | `ForkJoinPool` |
+|---|---|---|
+| Queue | unbounded LinkedBlockingQueue | deque per worker |
+| Balanced load | no (push only) | yes (work-stealing) |
+| Ideal for | independent tasks | recursive tasks |
+| Blocking-safe | usually yes | requires `ManagedBlocker` |
+
+For tasks **not** divided into subtasks, a classic ThreadPool is often
+simpler.
+
+## Virtual threads and FJP
+
+Virtual threads (Java 21+) internally use a `ForkJoinPool` as their
+**scheduler** ("carrier threads"). A `Thread.sleep` on a virtual thread parks
+the carrier, letting another virtual thread run on it. That is why you no
+longer need dedicated I/O pools for most cases.
+
+## Typical interview questions
+
+- *"Work-stealing vs round-robin?"* — locality + less contention.
+- *"When NOT to use the commonPool?"* — blocking tasks, workload isolation.
+- *"What is `ManagedBlocker` for?"* — compensate blocked workers.
+- *"Why can `parallelStream()` slow down the app?"* — shared commonPool
+  saturation.
+- *"How are virtual threads related to ForkJoinPool?"* — the pool acts as a
+  carrier scheduler.

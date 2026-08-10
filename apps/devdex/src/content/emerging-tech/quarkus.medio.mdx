@@ -1,0 +1,66 @@
+# Quarkus — Comparativa con Spring
+
+## Tabellina di confronto
+
+| Aspetto | Spring Boot | Quarkus |
+|---|---|---|
+| Filosofia | Convenzioni runtime | Convenzioni build-time |
+| Modello dev | Restart manuale (anche con Devtools) | Live reload subito |
+| Native | Possibile con AOT da Spring 6 | Nativo "in casa" da v1 |
+| Reactive | WebFlux (Reactor) | Mutiny + Vert.x |
+| Estensioni | Starter Maven | Estensioni con metadata |
+| Standard | Spring-specific | Jakarta EE + MicroProfile |
+
+## Programming models
+
+Quarkus consente sia:
+
+- **Imperative** (servlet/blocking) con virtual threads (`@RunOnVirtualThread`).
+- **Reactive** con Mutiny (`Uni<T>`, `Multi<T>`).
+
+```java
+@GET
+public Uni<List<Fruit>> all() {
+    return Fruit.listAll();   // panache + mutiny
+}
+```
+
+## Panache: persistence semplificata
+
+Estende JPA/Hibernate con un'API "Active Record":
+
+```java
+@Entity
+public class Fruit extends PanacheEntity {
+    public String name;
+    public String color;
+}
+
+// uso
+List<Fruit> red = Fruit.list("color", "red");
+Fruit.deleteById(42L);
+```
+
+## Configurazione
+
+Usa `application.properties` come Spring, ma può sovrascrivere a runtime con env
+vars seguendo MicroProfile Config:
+
+```
+quarkus.datasource.username=devdex
+QUARKUS_DATASOURCE_PASSWORD=secret
+```
+
+## Test
+
+`@QuarkusTest` avvia il contesto in-process. È velocissimo perché Quarkus non scansiona
+nulla a runtime.
+
+```java
+@QuarkusTest
+class HelloTest {
+    @Test void ok() {
+        given().get("/hello").then().statusCode(200);
+    }
+}
+```

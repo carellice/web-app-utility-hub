@@ -1,0 +1,88 @@
+# JDBC vs Hibernate
+
+## JDBC: the base API
+
+**JDBC** (Java Database Connectivity) is the standard API to talk to a
+relational DB in Java. It is *low-level*: you write SQL by hand and manage
+connections and result mapping.
+
+```java
+try (var conn = ds.getConnection();
+     var ps = conn.prepareStatement("SELECT id, email FROM users WHERE active = ?")) {
+    ps.setBoolean(1, true);
+    try (var rs = ps.executeQuery()) {
+        while (rs.next()) {
+            User u = new User(rs.getLong("id"), rs.getString("email"));
+            ...
+        }
+    }
+}
+```
+
+- **PreparedStatement** prevents SQL injection.
+- **try-with-resources** closes everything at the end of the block.
+- **ResultSet** is a cursor: iterate, not a list.
+
+## Hibernate / JPA: ORM
+
+**JPA** (Java Persistence API) is the specification; **Hibernate** is the most
+popular implementation. You map Java classes to tables:
+
+```java
+@Entity
+public class User {
+    @Id @GeneratedValue Long id;
+    String email;
+    boolean active;
+}
+
+// Repository (Spring Data):
+public interface UserRepo extends JpaRepository<User, Long> {
+    List<User> findByActiveTrue();
+}
+
+userRepo.findByActiveTrue();    // generates SQL for you
+```
+
+## Comparison
+
+| Aspect | JDBC | Hibernate (JPA) |
+|---|---|---|
+| Level | Low-level, hand-written SQL | High-level, ORM |
+| Code | Verbose | Concise |
+| Performance | Predictable | More abstract, can surprise |
+| Cache | No | First/Second level |
+| Lazy loading | No | Yes |
+| Learning curve | Low | Medium-high |
+| Typical for | High-perf, batch | CRUD, rich domain |
+
+## When JDBC
+
+- Critical performance and predictability.
+- Complex SQL queries, reporting.
+- Massive batch insert/update.
+- Minimal stack, no magic.
+
+## When Hibernate / JPA
+
+- Repetitive CRUD, domain with many entities.
+- Complex relationships and navigation between objects.
+- Automatic auditing, soft delete, version control.
+- You want to switch DB one day without rewriting SQL.
+
+## Middle ground
+
+- **Spring JdbcTemplate**: JDBC with reduced boilerplate.
+- **jOOQ**: "typed" SQL generated from the DB; control + ergonomics.
+- **MyBatis**: explicit SQL in XML/annotations, automatic mapping.
+
+```java
+// JdbcTemplate
+List<User> users = jdbc.query(
+    "SELECT id, email FROM users WHERE active = ?",
+    (rs, i) -> new User(rs.getLong("id"), rs.getString("email")),
+    true);
+```
+
+For many projects, the combo Spring Data JPA (for 80% CRUD) +
+jOOQ/JdbcTemplate (for complex queries) is the best choice.

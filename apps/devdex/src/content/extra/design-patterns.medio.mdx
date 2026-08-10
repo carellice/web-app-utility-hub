@@ -1,0 +1,182 @@
+# Design Patterns — Più pattern, più Java
+
+## Template Method
+
+Il padre definisce lo "scheletro" di un algoritmo; le sottoclassi riempiono i passi:
+
+```java
+public abstract class AbstractImporter {
+    public final void run(Path file) {
+        var data = read(file);
+        var clean = transform(data);
+        save(clean);
+    }
+    protected abstract List<Record> read(Path file);
+    protected abstract List<Record> transform(List<Record> data);
+    protected abstract void save(List<Record> data);
+}
+```
+
+Critica: l'ereditarietà cementa il flusso. Alternative: pattern Pipeline con
+composizione.
+
+## Command
+
+Incapsula una richiesta come oggetto:
+
+```java
+public interface Command { void execute(); }
+
+public class SendEmailCommand implements Command {
+    private final String to, body;
+    public SendEmailCommand(String to, String body) { this.to = to; this.body = body; }
+    public void execute() { mail.send(to, body); }
+}
+
+// Queue, retry, undo, history → tutti diventano possibili
+queue.enqueue(new SendEmailCommand(to, body));
+```
+
+In Java moderno: lambda + `Runnable` o `Consumer` spesso sostituiscono i Command "leggeri".
+
+## Chain of Responsibility
+
+Una catena di handler che si passano la richiesta:
+
+```java
+public interface Filter {
+    void doFilter(Request req, Response res, FilterChain chain);
+}
+```
+
+Servlet API è esattamente questo. Spring Security usa una catena di filter (15+ filter
+per default).
+
+## Proxy
+
+Stand-in per un altro oggetto: lazy, remote, security, virtual.
+
+- **Lazy proxy**: Spring `@Lazy`.
+- **Remote proxy**: stub RMI, Feign client.
+- **Security proxy**: Spring Security method security.
+- **Virtual proxy**: ORM lazy loading di Hibernate.
+
+```java
+public class LazyProxy<T> implements Supplier<T> {
+    private final Supplier<T> factory;
+    private volatile T instance;
+    public LazyProxy(Supplier<T> f) { this.factory = f; }
+    public T get() {
+        T i = instance;
+        if (i == null) synchronized(this) { if ((i = instance) == null) instance = i = factory.get(); }
+        return i;
+    }
+}
+```
+
+## Composite
+
+Trattare oggetti singoli e gruppi nello stesso modo:
+
+```java
+public sealed interface Filesystem permits File, Directory {
+    long size();
+}
+public record File(String name, long size) implements Filesystem {}
+public record Directory(String name, List<Filesystem> children) implements Filesystem {
+    public long size() {
+        return children.stream().mapToLong(Filesystem::size).sum();
+    }
+}
+```
+
+Sealed + record è il modo idiomatico moderno per Composite.
+
+## Iterator
+
+L'API più antica diventata standard. In Java moderno: `Stream`, `Iterable`,
+`Spliterator`. Raramente serve implementarlo a mano.
+
+## State
+
+Cambia il comportamento al variare di uno stato interno:
+
+```java
+public sealed interface ConnectionState permits Open, Closed, Half {}
+
+public class Connection {
+    private ConnectionState state = new Closed();
+    public void send(byte[] data) {
+        state = switch (state) {
+            case Open o   -> { o.write(data); yield o; }
+            case Closed c -> throw new IllegalStateException();
+            case Half h   -> { h.queue(data); yield h; }
+        };
+    }
+}
+```
+
+## Mediator
+
+Un oggetto centralizzato che orchestra interazioni:
+
+- UI: form mediator per gestire enable/disable dei field.
+- Microservizi: workflow orchestrator (Temporal).
+- Aerei: AirTraficControlMediator.
+
+Evita il network "n-to-n" delle dipendenze.
+
+## Visitor
+
+Aggiungere operazioni a una gerarchia di tipi senza modificarli:
+
+```java
+public interface Visitor<R> {
+    R visitCircle(Circle c);
+    R visitSquare(Square s);
+}
+
+public sealed interface Shape {
+    <R> R accept(Visitor<R> v);
+}
+```
+
+Dolore tipico: ogni nuovo tipo richiede di aggiornare tutti i Visitor. In Java
+moderno, **pattern matching** dei sealed elimina la necessità:
+
+```java
+double area = switch (shape) {
+    case Circle c -> Math.PI * c.r() * c.r();
+    case Square s -> s.s() * s.s();
+};
+```
+
+## DAO / Repository
+
+Astrae l'accesso a dati. Repository del DDD (Eric Evans) è il successore moderno:
+
+```java
+public interface OrderRepository {
+    Optional<Order> findById(OrderId id);
+    void save(Order o);
+}
+```
+
+Spring Data lo automatizza con interfacce derivate.
+
+## DTO vs Entity
+
+- **Entity**: oggetto del dominio, identity (`equals` su id), comportamento.
+- **DTO** (Data Transfer Object): solo dati, "wire format" tra layer.
+- **Value Object**: identità basata sui valori, immutabile.
+
+Mescolare i tre concetti è il bug numero uno in molti codebase Spring.
+
+## DDD building blocks
+
+- **Entity**: ha identità.
+- **Value Object**: senza identità.
+- **Aggregate**: cluster di entity + value object, ha un *root*.
+- **Repository**: persistenza per aggregate root.
+- **Service**: comportamento che non appartiene a un'entity.
+- **Factory**: creazione complessa.

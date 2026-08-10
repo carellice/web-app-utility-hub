@@ -1,0 +1,81 @@
+# Indici DB — Le basi
+
+Un **indice** è una struttura ausiliaria che il DBMS mantiene per trovare velocemente
+le righe di una tabella. Senza indice, una query con `WHERE` deve scorrere tutta la
+tabella (**full table scan**).
+
+```sql
+CREATE INDEX idx_users_email ON users(email);
+```
+
+Da questo momento, `SELECT * FROM users WHERE email = ?` può usare l'indice anziché
+scansionare ogni riga.
+
+## Trade-off
+
+| Pro | Contro |
+|---|---|
+| Letture velocissime | Scritture più lente (devo aggiornare l'indice) |
+| Aggregazioni e ORDER BY accelerati | Spazio disco |
+| Vincoli `UNIQUE` implementati | Statistiche da mantenere |
+
+> 💡 Più indici = più I/O e RAM occupati. Aggiungi solo quelli giustificati.
+
+## Tipi base
+
+- **B-tree** (default): bilanciato, range query veloci (`<`, `>`, `BETWEEN`).
+- **Hash**: solo equality (`=`). Rarissimo come default (Postgres lo ha ma vuole
+  configurazione esplicita).
+- **Full-text**: ricerca testuale (`MATCH ... AGAINST` MySQL, `tsvector` Postgres).
+- **Spaziale**: PostGIS, MySQL Spatial.
+- **GIN/GiST/BRIN** (Postgres): per JSON, array, range, time series.
+
+## Primary key
+
+Una **primary key** crea automaticamente un indice (`UNIQUE` + `NOT NULL`). In molti
+DBMS è anche **cluster key**: le righe sono fisicamente ordinate per la PK
+(InnoDB, SQL Server). In Postgres no: tutti gli indici sono "secondari".
+
+## Indice composito
+
+```sql
+CREATE INDEX idx_orders_user_status ON orders(user_id, status);
+```
+
+Utile per query come:
+
+```sql
+SELECT * FROM orders WHERE user_id = ? AND status = 'PAID';
+```
+
+**Regola del "leftmost prefix"**: l'indice è usato solo se la query fissa le colonne
+**da sinistra**. Vedi il livello Medio per i dettagli.
+
+## Verifica che un indice venga usato
+
+```sql
+EXPLAIN SELECT * FROM users WHERE email = 'a@b.it';
+```
+
+Output (Postgres):
+
+```
+Index Scan using idx_users_email on users  (cost=0.29..8.31 rows=1 width=...)
+   Index Cond: ((email)::text = 'a@b.it'::text)
+```
+
+Se vedi `Seq Scan` → full table scan, indice non usato o non esistente.
+
+## Quando creare un indice?
+
+Quando:
+
+1. La colonna è usata spesso in `WHERE`, `JOIN`, `ORDER BY`.
+2. La cardinalità è ragionevolmente alta (molti valori distinti).
+3. La tabella è abbastanza grande perché il scan sia costoso.
+
+Quando **no**:
+
+1. Tabella piccola: il full scan è già veloce.
+2. Colonne con pochi valori distinti (es. boolean): meglio indici parziali.
+3. Sui dati hot-write se le query di lettura sono rare.

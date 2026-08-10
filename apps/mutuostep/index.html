@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#2563eb" />
+  <meta name="description" content="MutuoStep — la PWA che ti guida nell'acquisto della prima casa con mutuo." />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="MutuoStep" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>MutuoStep — La tua guida al mutuo</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="brand-name">MutuoStep</span>
+    </div>
+    <div class="topbar-actions">
+      <button id="helpBtn" class="icon-btn" type="button" aria-label="Rivedi tutorial" title="Rivedi tutorial">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.2 9.2a2.8 2.8 0 1 1 4.3 2.3c-.9.6-1.5 1.1-1.5 2.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="17" r="1.1" fill="currentColor"/></svg>
+      </button>
+      <button id="installBtn" class="install-btn" hidden>Installa</button>
+    </div>
+  </header>
+
+  <main id="view" class="view"></main>
+
+  <nav class="bottom-nav" aria-label="Navigazione principale">
+    <a href="#/home" data-tab="home" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span>
+      <span class="nav-label">Home</span>
+    </a>
+    <a href="#/budget" data-tab="budget" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+      <span class="nav-label">Budget</span>
+    </a>
+    <a href="#/roadmap" data-tab="roadmap" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5" fill="currentColor"/><circle cx="6" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 8.5v7" stroke="currentColor" stroke-width="2"/><path d="M10 6h10M10 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+      <span class="nav-label">Roadmap</span>
+    </a>
+    <a href="#/altro" data-tab="altro" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="2"/><rect x="14" y="3" width="7" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="14" width="7" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="2"/><rect x="14" y="14" width="7" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="2"/></svg></span>
+      <span class="nav-label">Altro</span>
+    </a>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+# REST vs SOAP vs RPC
+
+The three main styles for exposing APIs over the network.
+
+## REST
+
+- **Resources** identified by URIs (`/users/42`).
+- **HTTP verbs**: GET (read), POST (create), PUT/PATCH (update), DELETE.
+- **Stateless**: every request carries its context (auth, parameters).
+- **JSON** typically (but payload-agnostic).
+
+```http
+GET /users/42 HTTP/1.1
+Accept: application/json
+```
+
+```json
+{ "id": 42, "name": "Anna" }
+```
+
+## SOAP
+
+Protocol **based on XML** with a formal `WSDL` contract. Heavy, but with mature
+enterprise features: WS-Security, distributed transactions, typed contracts.
+
+```xml
+<soap:Envelope>
+  <soap:Body>
+    <getUser><id>42</id></getUser>
+  </soap:Body>
+</soap:Envelope>
+```
+
+You often find it in banks, insurers, public administration: legacy systems
+with strict rules.
+
+## RPC (Remote Procedure Call)
+
+Conceptually: you call a **remote function** as if it were local. JSON-RPC,
+XML-RPC, gRPC.
+
+- **gRPC**: uses Protobuf (compact binary) and HTTP/2. Bidirectional streaming,
+  generated typed code. The de-facto standard for internal microservice
+  communication.
+
+```protobuf
+service UserService {
+  rpc GetUser (UserId) returns (User);
+}
+```
+
+## When to use what?
+
+| Scenario | Pick |
+|---|---|
+| Public API for web/mobile | REST |
+| High-throughput internal microservice comms | gRPC |
+| Enterprise/legacy integration with a formal contract | SOAP |
+| Client-flexible query API | GraphQL |

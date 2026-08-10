@@ -1,0 +1,38 @@
+# Sync vs Async
+
+**Synchronous**: you call a function, wait for the result, continue.
+
+```java
+String html = http.get("https://example.com");  // blocking
+process(html);                                  // runs only when html is ready
+```
+
+**Asynchronous**: you call a function, it gives you a "ticket" (Future,
+CompletableFuture, callback). The thread keeps doing other work; when the
+result is ready, you get notified.
+
+```java
+CompletableFuture<String> cf = http.getAsync("https://example.com");
+cf.thenAccept(this::process);   // process is called when html arrives
+// meanwhile this thread does other things
+```
+
+## Why does it matter?
+
+- **Performance**: the thread doesn't sit idle waiting for I/O.
+- **Scalability**: with few threads (e.g. Netty's event loop) you serve
+  thousands of requests.
+- **UX**: in a desktop/mobile app you don't freeze the UI.
+
+## Future (Java 5)
+
+```java
+ExecutorService ex = Executors.newFixedThreadPool(4);
+Future<Integer> f = ex.submit(() -> heavyComputation());
+
+// do other things...
+int result = f.get();   // blocking if not yet ready
+```
+
+`Future` is limited: you can't "chain" or easily combine it with others.
+That's where `CompletableFuture` comes from.

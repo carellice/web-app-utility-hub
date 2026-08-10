@@ -1,0 +1,81 @@
+# API style — Nuggets and optimizations
+
+## HTTP/2, HTTP/3 and what changes for REST
+
+HTTP/1.1 opens N connections to parallelize → high cost (TLS handshakes).
+HTTP/2: multiplexing over a single TCP connection. HTTP/3: same over QUIC
+(UDP), eliminating "head-of-line blocking" at the TCP level.
+
+Practical effects:
+
+- Aggressive `keep-alive`: a pool of **1 connection per host** can be enough.
+- HTTP/2 server push was used for CSS/JS, now effectively obsolete (browsers
+  disabled it).
+- gRPC works because it requires HTTP/2.
+
+## Idempotency in detail
+
+An idempotent verb = repeating N times has the same effect as once. Important
+for:
+
+- Safe retries (proxies, mobile on flaky network).
+- Distributed resilience (see outbox pattern).
+
+Trap: a POST with `Idempotency-Key` is truly idempotent only if:
+
+1. The server *transactionally* stores `(key, response)` with the result.
+2. The cached response is returned with exactly the same status.
+3. The key is valid for a finite time (TTL) to avoid unbounded growth.
+
+## Caching: ETag and If-None-Match
+
+```http
+GET /users/42 HTTP/1.1
+If-None-Match: "v123"
+
+HTTP/1.1 304 Not Modified
+```
+
+You save body serialization. But you must compute the ETag (version, hash).
+Pair with CDN for push caching.
+
+## Backpressure in gRPC streaming
+
+Server streaming can saturate the client if you don't control flow. gRPC uses
+HTTP/2 flow control (window), but on top of it you typically want application-
+level **batch + ack**.
+
+## SOAP: WS-Reliable Messaging
+
+Historically SOAP offered "at-least-once" / "exactly-once" delivery at protocol
+level. In REST/gRPC this guarantee moves up to the application level (broker +
+idempotency).
+
+## API gateway pattern
+
+For microservices, a gateway (Kong, Apigee, Spring Cloud Gateway) handles:
+
+- Auth/JWT.
+- Rate limiting.
+- Routing.
+- Aggregation (BFF).
+- Translation (e.g. external REST → internal gRPC).
+
+> 💡 Don't push business logic into the gateway: it becomes a hidden monolith.
+
+## Common anti-patterns
+
+- **Tunneling**: an endpoint `POST /api/do` with `{ action: "createOrder" }`.
+  Destroys HTTP semantics and caching.
+- **PUT doing a partial update**: use PATCH (RFC 7396 for JSON merge patch or
+  RFC 6902 for JSON patch).
+- **200 with `error` in the body**: breaks any client/monitoring that expects
+  the correct status code.
+- **Exposing internal DB IDs**: leaks info, enumeration risk. Use UUIDs or
+  hashids.
+
+## OpenAPI (Swagger): contract first
+
+Design the contract first (`openapi.yaml`), generate client/server. Spring
+`springdoc-openapi` extracts OpenAPI from controllers, but the best quality
+comes from writing it by hand.

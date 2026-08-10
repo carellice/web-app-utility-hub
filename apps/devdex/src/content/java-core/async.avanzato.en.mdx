@@ -1,0 +1,66 @@
+# Advanced async: ForkJoinPool, callback hell, Virtual Threads
+
+## ForkJoinPool
+
+Pool optimized for **divide-and-conquer** tasks: each thread has its own
+deque and does **work-stealing** when it finishes. It is the backbone of:
+
+- Parallel streams.
+- `CompletableFuture` (default commonPool).
+- `parallelStream` on every collection.
+
+> ⚠️ The commonPool is **shared**: if you submit blocking tasks (I/O, DB) you
+> "clog" the entire JVM. Use dedicated pools.
+
+`ManagedBlocker` lets you tell the pool you are about to block, so it can
+spawn temporary additional threads (see `ForkJoinPool.managedBlock`).
+
+## Callback hell vs CompletableFuture
+
+Pure callbacks (Java 1.x listener style) lead to "pyramids of doom".
+CompletableFutures *flatten* the composition, but if the pipeline gets long
+debugging is harsh (stacktraces without the original call).
+
+Tricks:
+
+- Name intermediate methods (`thenApply(this::parse)` instead of anonymous
+  lambdas).
+- Use `CompletableFuture.completedFuture(...)` in tests.
+- Add logs with `whenComplete((v, ex) -> ...)` *without* transforming the
+  pipeline.
+
+## Reactive (Reactor / RxJava)
+
+`Mono<T>` and `Flux<T>` are the reactive model: they add **backpressure** (the
+consumer drives the producer's pace), full stream operators (`window`,
+`buffer`, `merge`...). See `WebClient` in Spring 6+.
+
+## Virtual Threads (Java 21+)
+
+Project Loom introduces **virtual threads**: very light threads (KB instead
+of MB), managed by the JVM and parked when blocked on I/O.
+
+```java
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    IntStream.range(0, 10_000).forEach(i ->
+        executor.submit(() -> {
+            String html = http.get(url);   // blocking, but doesn't block a carrier
+            return parse(html);
+        })
+    );
+}
+```
+
+For many use cases, **virtual threads make the reactive model unnecessary**:
+the code stays synchronous but scales as if it were async.
+
+> 💡 Beware `synchronized` with virtual threads: before Java 24 it "pinned"
+> the carrier thread (workaround: use `ReentrantLock`). Since 24 pinning is
+> resolved.
+
+## Cancellation
+
+`CompletableFuture.cancel(true)` does *not* interrupt the task if it is
+already running: it only marks the future as completed exceptionally. For
+truly interruptible tasks you must handle `Thread.interrupted()` or use a
+`Future` from an `ExecutorService` with cooperative tasks.

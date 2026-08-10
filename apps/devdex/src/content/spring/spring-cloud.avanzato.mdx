@@ -1,0 +1,161 @@
+# Spring Cloud — Avanzato e direzione futura
+
+## Deprecazioni Netflix OSS
+
+Netflix ha messo in maintenance:
+
+- **Hystrix** → sostituito da **Resilience4j**.
+- **Ribbon** → sostituito da **Spring Cloud LoadBalancer** (reactive).
+- **Zuul 1** → sostituito da **Spring Cloud Gateway**.
+- **Eureka** → ancora attivo, ma valutare K8s native discovery.
+
+Da Spring Cloud 2022.0.x: Hystrix/Ribbon non sono più nelle BOM.
+
+## Refresh @RefreshScope: come funziona
+
+I bean annotati con `@RefreshScope` vivono in uno scope custom (`refresh`). Quando
+`/actuator/refresh` viene chiamato:
+
+1. Spring Cloud Context emette `RefreshEvent`.
+2. I bean refresh-scope vengono **distrutti**.
+3. Al prossimo utilizzo, vengono **ricreati** con le nuove properties.
+
+Implicazioni:
+
+- Riferimenti diretti al bean refresh-scope da bean singleton ricevono un **proxy**;
+  altrimenti vedrebbero ancora l'istanza vecchia.
+- La ricostruzione è "in-flight": chiamate concorrenti vedono stati misti.
+
+## OpenFeign sotto il cofano
+
+`@FeignClient` registra un `FactoryBean` che, al getBean, crea un proxy che:
+
+1. Apre uno `HttpClient` (Apache, OkHttp, JDK 11+).
+2. Serializza i `@RequestBody` con Jackson.
+3. Esegue chiamate via `LoadBalancerInterceptor` se è `@LoadBalanced`.
+4. Applica error decoder, retry, CB.
+
+Logging: `Logger.Level.FULL` stampa request/response (solo dev).
+
+## Spring Cloud Gateway: dataflow reactive
+
+Gateway usa Reactor. Ogni route è una funzione `RouteLocator`:
+
+```java
+@Bean
+public RouteLocator routes(RouteLocatorBuilder b) {
+    return b.routes()
+        .route("orders", r -> r
+            .path("/api/orders/**")
+            .filters(f -> f.stripPrefix(1)
+                           .retry(3)
+                           .circuitBreaker(c -> c.setName("orders-cb")
+                                                  .setFallbackUri("forward:/fallback")))
+            .uri("lb://orders-service"))
+        .build();
+}
+```
+
+I filter sono `Mono`-friendly. È critico **non bloccare** dentro un filter: viola il
+modello Netty e droppa thread.
+
+## Config server: backend e crittografia
+
+- Backend: Git (default), Vault, JDBC, native filesystem.
+- Crittografia: `{cipher}AQA...` valore cifrato; il server decifra con chiave AES
+  o RSA.
+- HA: più istanze, repo Git condiviso.
+
+```yaml
+encrypt:
+  key: my-symmetric-key
+```
+
+## Spring Cloud Stream: binder e DLQ
+
+```yaml
+spring:
+  cloud:
+    stream:
+      bindings:
+        processOrder-in-0:
+          destination: orders
+          group: order-svc
+          consumer:
+            maxAttempts: 3
+            backOffInitialInterval: 1000
+      kafka:
+        bindings:
+          processOrder-in-0:
+            consumer:
+              enableDlq: true
+              dlqName: orders-dlq
+```
+
+Messaggio dopo 3 retry → DLQ. Si processa fuori dal flusso principale.
+
+## Multi-tenancy con Spring Cloud
+
+Pattern comuni:
+
+- **Tenant in header**: filter che setta MDC + `TenantContextHolder`.
+- **Connection pool per tenant**: `AbstractRoutingDataSource`.
+- **Schema per tenant**: Hibernate `tenant_identifier_resolver` + `multi_tenancy=SCHEMA`.
+
+## Distributed cache
+
+`spring-cache` + Caffeine (locale) o Redis (distribuito). Combinato con Spring Cloud
+LoadBalancer per cache "vicina al cliente".
+
+Trappola: invalidation con N istanze. Soluzioni:
+- Topic Redis con publish/subscribe per evict.
+- TTL aggressive + accept eventual consistency.
+
+## Spring Cloud Function + serverless
+
+```java
+@SpringBootApplication
+public class App {
+    public static void main(String[] a) { SpringApplication.run(App.class, a); }
+
+    @Bean
+    public Function<String, String> uppercase() {
+        return String::toUpperCase;
+    }
+}
+```
+
+Stesso bean si esegue:
+- Come endpoint REST (Spring MVC).
+- Come Kafka listener (Stream).
+- Come AWS Lambda (adapter).
+- Come function nello Spring Cloud Gateway.
+
+## Diagnostica
+
+- **Spring Cloud Sleuth/Micrometer Tracing**: aggiungere a tutti i servizi per
+  vedere la trace cross-servizio.
+- **Spring Boot Admin**: dashboard centralizzata su `/actuator` di N istanze.
+- **OpenTelemetry Collector**: punto unico per trace/metric/log → Jaeger,
+  Prometheus, Loki.
+
+## Quando NON serve Spring Cloud
+
+- Mono-servizio: nessun discovery, niente config server.
+- 2-3 servizi con K8s: usa Service, ConfigMap, Secret, Istio.
+- Function semplici → AWS Lambda native (Quarkus, Micronaut, GraalVM).
+
+## Roadmap
+
+Spring Cloud 2024.x:
+- Spostamento progressivo su Micrometer Tracing.
+- Maggiore integrazione con Kubernetes nativo.
+- Gateway: supporto MVC variant (non solo reactive).
+
+## Domande tipiche al colloquio
+
+- *"Cos'è Spring Cloud Config?"* — config centralizzata + refresh dinamico.
+- *"Eureka vs DNS K8s?"* — sovrapposizione, scelta architetturale.
+- *"Come spezzeresti un microservizio con Feign + Resilience4j?"*
+- *"Cosa fa `@RefreshScope` tecnicamente?"* — distruzione + ricostruzione.
+- *"Service mesh sostituisce Spring Cloud?"* — solo per concern di rete.

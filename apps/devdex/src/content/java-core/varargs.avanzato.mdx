@@ -1,0 +1,69 @@
+# Varargs: under the hood
+
+## Cosa fa davvero il compilatore
+
+Per la firma `void log(String msg, Object... args)`, javac genera il bytecode di un
+metodo `void log(String, Object[])`. Al call site, una chiamata variadic come
+`log("x", a, b)` viene tradotta in:
+
+```text
+anewarray Object
+dup; ldc 0; aload a; aastore
+dup; ldc 1; aload b; aastore
+invokevirtual log:(LString;[LObject;)V
+```
+
+Cioè: **allocazione di un nuovo array a ogni chiamata**. Su hot path è il motivo per cui
+metodi come `Logger.log(Level, String, Object[])` hanno tante overload "manuali" con
+1, 2, 3 argomenti.
+
+## Heap pollution con generics
+
+`T...` viene "cancellato" a `Object[]`. Ciò consente di insinuare il tipo sbagliato:
+
+```java
+@SafeVarargs
+static <T> T first(T... xs) { return xs[0]; }
+
+static List<String>[] danger() {
+    return (List<String>[]) new List[]{ List.of("a") };  // unchecked
+}
+```
+
+Per questo `@SafeVarargs` esiste *solo* su metodi che il chiamante non può sovrascrivere
+con un'implementazione meno sicura (`static`, `final` o `private`, ora anche metodi
+default `private`).
+
+## Reflection: `Method.invoke(obj, Object...)`
+
+`Method.invoke` ha `Object... args`. Se il tuo metodo target accetta `Object[]`, devi
+fare attenzione:
+
+```java
+Method m = Foo.class.getMethod("bar", Object[].class);
+m.invoke(foo, new Object[]{ new Object[]{1, 2} });    // un array CONTENENTE un array
+// oppure
+m.invoke(foo, (Object) new Object[]{1, 2});           // cast esplicito a Object
+```
+
+Errore tipico: passare `m.invoke(foo, new Object[]{1, 2})` → il varargs viene
+"sbobinato" e Java pensa siano due argomenti, non un singolo array.
+
+## Differenza con i metodi macroassemblati C-style
+
+A differenza di C (`...` + `va_list`), Java è **fortemente tipato sui varargs**:
+sai sempre il tipo runtime degli elementi (modulo erasure dei generics). Non c'è
+nessun trucco a livello di stack.
+
+## Performance tip
+
+Per metodi "log" o "format" hot, il pattern moderno è:
+
+```java
+if (logger.isDebugEnabled()) {
+    logger.debug("user={} cart={}", userId, cart);  // Slf4j: lazy, niente alloca
+}
+```
+
+Oppure usare `Supplier<String>` per posticipare la concatenazione: ad esempio
+`logger.atDebug().log(() -> "...")`.

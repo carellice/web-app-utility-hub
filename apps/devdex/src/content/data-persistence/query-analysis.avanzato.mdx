@@ -1,0 +1,196 @@
+# Analisi query — Avanzato
+
+## Workflow di tuning
+
+1. **Reproduce**: catturare la query (slow log, APM).
+2. **Misurare**: `EXPLAIN ANALYZE` con dati realistici (no `LIMIT 1` su table piccolo).
+3. **Comprendere il piano**: scan, join, sort, aggregate.
+4. **Ipotesi**: indice mancante, stat obsolete, JOIN inverso, pagination cattiva.
+5. **Modifica una sola cosa**: indice / riscrittura / hint.
+6. **Misurare di nuovo**: stesso input, planner cache invalidata (`DISCARD PLANS`).
+
+## Misurare in produzione
+
+- **pg_stat_statements** (Postgres): top query per tempo/chiamate.
+- **performance_schema** (MySQL): `events_statements_summary_by_digest`.
+- **APM**: Datadog, New Relic, Elastic APM → query spans con stack trace.
+
+```sql
+SELECT query, calls, mean_exec_time, total_exec_time
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 20;
+```
+
+## Plan stability
+
+I planner moderni "ricalcolano" il piano per ogni query (PostgreSQL) o lo cachea
+(MySQL, Oracle, SQL Server). Una query lenta improvvisamente può indicare:
+
+- **Skewed plan**: dati cambiati, planner sceglie diversamente.
+- **Plan cache invalidation**: stat aggiornate → ri-pianificazione.
+
+Soluzioni:
+
+- Hint (Oracle, MySQL).
+- Indici forzati (`FORCE INDEX` MySQL).
+- Riscrivere la query.
+- Postgres 12+: `pg_hint_plan` extension per hint commenti.
+
+## Generic plan vs custom plan (Postgres)
+
+Per prepared statement Postgres genera **5 piani custom** (con i parametri reali),
+poi switcha a **generic plan** se sembra equivalente. Per query con cardinalità che
+varia molto in base ai parametri:
+
+```text
+SET plan_cache_mode = force_custom_plan;
+```
+
+A livello connection.
+
+## Skew, parameter sniffing
+
+Stessa query, parametri diversi, performance diverse:
+
+```sql
+SELECT * FROM orders WHERE user_id = ?;
+```
+
+- `user_id = 1` (utente con 100 ordini): piano corretto.
+- `user_id = 42` (utente con 10M ordini): piano sbagliato (planner non sa).
+
+Mitigazioni:
+
+- Esplicito `OFFSET 0` o riscritture.
+- "Optimize for value" in SQL Server.
+- Statistiche istogramma più dettagliate.
+
+## Partition pruning
+
+Tabelle partitioned (per range, list, hash):
+
+```sql
+CREATE TABLE events(occurred_at timestamptz, ...) PARTITION BY RANGE (occurred_at);
+CREATE TABLE events_2026_01 PARTITION OF events
+    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+```
+
+Query con filtro su `occurred_at` → planner accede solo alle partizioni rilevanti
+("partition pruning"). Indispensabile su tabelle multi-TB.
+
+Trappola: predicato funzione + partition key → no pruning (es. `WHERE DATE(occurred_at) = ?`).
+
+## Index-Only scan e visibility map
+
+Postgres può fare Index-Only Scan **solo se** la visibility map indica che tutte le
+tuple in quei blocchi sono visibili a tutte le transazioni. Aggiornamenti frequenti →
+visibility map sparsa → fallback a Index Scan classico.
+
+Soluzione: `VACUUM` mantiene la visibility map. `VACUUM ANALYZE` periodico.
+
+## LATERAL JOIN
+
+Subquery per ogni riga del lato sinistro, ma il planner la vede come parte del piano
+(diverso da subquery scalare):
+
+```sql
+SELECT u.id, top.total
+FROM users u
+JOIN LATERAL (
+    SELECT total FROM orders o WHERE o.user_id = u.id ORDER BY total DESC LIMIT 1
+) top ON true;
+```
+
+Performance migliore di subquery correlate, perché optimizer ottimizza l'inner per
+ogni outer row.
+
+## Window functions
+
+```sql
+SELECT id, user_id, total,
+       ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY total DESC) AS rn
+FROM orders;
+```
+
+Spesso una window function sostituisce subquery complesse con performance migliori.
+
+## EXPLAIN per piani paralleli
+
+Postgres parallelizza (`Parallel Seq Scan`, `Gather`):
+
+```text
+Gather (workers: 4)
+  -> Parallel Seq Scan on orders
+        Filter: ...
+```
+
+Per query enormi: parallel scan + parallel aggregate. Tuning:
+
+```text
+max_parallel_workers_per_gather = 4
+parallel_setup_cost = 1000
+parallel_tuple_cost = 0.1
+```
+
+## JSON heavy queries
+
+JSONB Postgres:
+
+```sql
+SELECT * FROM events WHERE payload->>'type' = 'click';
+```
+
+Senza indice: Seq Scan.
+Con GIN:
+
+```sql
+CREATE INDEX idx_payload ON events USING GIN (payload jsonb_path_ops);
+SELECT * FROM events WHERE payload @> '{"type": "click"}';
+```
+
+`jsonb_path_ops` è più piccolo e veloce per il contains operator `@>`.
+
+## Top-N query patterns
+
+```sql
+-- Top 1 per gruppo (DISTINCT ON Postgres)
+SELECT DISTINCT ON (user_id) *
+FROM orders ORDER BY user_id, created_at DESC;
+
+-- Equivalente con window function
+SELECT * FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) rn
+    FROM orders
+) t WHERE rn = 1;
+```
+
+`DISTINCT ON` è una feature Postgres molto idiomatica e veloce.
+
+## Tracing distribuito di SQL
+
+Spring + Datasource Micrometer:
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 1
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+```
+
+Aggancia OpenTelemetry: ogni query SQL diventa un **span** nella trace, con
+durata, parametri (mascherati). Visualizzabile in Jaeger.
+
+## Domande tipiche al colloquio
+
+- *"Come investigi una query lenta?"* — workflow EXPLAIN.
+- *"Cos'è il N+1 e come lo correggi?"* — JOIN FETCH, batch.
+- *"Differenza Index Scan / Bitmap Scan / Seq Scan?"*
+- *"Parameter sniffing in SQL Server?"*
+- *"Quando una CTE è anti-pattern (pre PG12)?"* — optimization fence.
+- *"Partition pruning: come funziona?"*
+- *"Index-only scan: cosa richiede?"* — covering + visibility map.

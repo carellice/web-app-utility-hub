@@ -1,0 +1,148 @@
+# OOP intermedio — Composition, SOLID, Java moderno
+
+## Composition over inheritance
+
+L'ereditarietà accoppia *for life* la sottoclasse alla superclasse. Modificare il padre
+rischia di rompere figli sconosciuti (**fragile base class problem**). La composizione
+è quasi sempre più flessibile:
+
+```java
+// male: eredita per "tirare giù" funzionalità che non c'entrano col tipo
+public class TimestampedList<E> extends ArrayList<E> { ... }
+
+// bene: la lista è un collaboratore interno, esponi solo ciò che serve
+public class TimestampedList<E> {
+    private final List<E> delegate = new ArrayList<>();
+    private final Map<E, Instant> ts = new HashMap<>();
+
+    public void add(E e) {
+        delegate.add(e);
+        ts.put(e, Instant.now());
+    }
+    public Instant timestampOf(E e) { return ts.get(e); }
+}
+```
+
+## I 5 principi SOLID
+
+| Lettera | Significato | In una riga |
+|---|---|---|
+| **S**RP | Single Responsibility | una classe = una ragione per cambiare |
+| **O**CP | Open/Closed | aperta all'estensione, chiusa alla modifica |
+| **L**SP | Liskov Substitution | i sottotipi devono rispettare il contratto del supertipo |
+| **I**SP | Interface Segregation | meglio interfacce piccole e specifiche |
+| **D**IP | Dependency Inversion | dipendi da astrazioni, non da implementazioni |
+
+### Esempio LSP violato
+
+```java
+public class Rectangle {
+    public void setWidth(int w) { ... }
+    public void setHeight(int h) { ... }
+}
+public class Square extends Rectangle {
+    @Override public void setWidth(int w)  { super.setWidth(w); super.setHeight(w); }
+    @Override public void setHeight(int h) { super.setWidth(h); super.setHeight(h); }
+}
+// chi usa Rectangle si aspetta che setWidth NON cambi height. Square viola LSP.
+```
+
+Soluzione: niente ereditarietà tra `Square` e `Rectangle`; entrambi implementano
+un'interfaccia `Shape`.
+
+## Java moderno: record, sealed, pattern matching
+
+### Record (Java 16+)
+
+Classe immutabile data carrier:
+
+```java
+public record Point(int x, int y) {
+    public Point {
+        if (x < 0 || y < 0) throw new IllegalArgumentException();
+    }
+    public double distance(Point other) {
+        return Math.hypot(x - other.x, y - other.y);
+    }
+}
+```
+
+Equals, hashCode, toString, accessor (`x()`, `y()`), costruttore canonico → automatici.
+
+### Sealed classes (Java 17+)
+
+Limitano chi può estendere/implementare:
+
+```java
+public sealed interface Shape permits Circle, Square, Triangle {}
+public record Circle(double r) implements Shape {}
+public record Square(double s) implements Shape {}
+public record Triangle(double a, double b, double c) implements Shape {}
+```
+
+Le sealed abilitano **switch esaustivo**:
+
+```java
+double area = switch (shape) {
+    case Circle c   -> Math.PI * c.r() * c.r();
+    case Square s   -> s.s() * s.s();
+    case Triangle t -> heron(t.a(), t.b(), t.c());
+    // niente default: il compilatore garantisce la totalità
+};
+```
+
+### Pattern matching per `instanceof`
+
+```java
+if (obj instanceof Account acc && acc.getBalance() > 1000) {
+    transfer(acc);
+}
+```
+
+Niente cast esplicito, niente null trap.
+
+## Equals & hashCode
+
+Contratto:
+
+- Riflessivo, simmetrico, transitivo, consistente.
+- `a.equals(b) ⇒ a.hashCode() == b.hashCode()`.
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (this == o) return true;
+    if (!(o instanceof Account other)) return false;
+    return Objects.equals(iban, other.iban);
+}
+
+@Override
+public int hashCode() { return Objects.hash(iban); }
+```
+
+> ⚠️ Trappola: definire `equals` solo su un sottoinsieme dei campi e poi mutare quei
+> campi mentre l'oggetto è in un `HashMap`. Cambia l'hash, l'oggetto sparisce.
+
+## Builder pattern
+
+Per costruttori con tanti parametri opzionali:
+
+```java
+Order order = Order.builder()
+    .id("o-42")
+    .customer("Anna")
+    .item("Coffee", 2)
+    .item("Croissant", 1)
+    .discount(0.10)
+    .build();
+```
+
+Lombok `@Builder` o `RecordBuilder` (annotation processor) lo generano per te.
+
+## Domande tipiche al colloquio
+
+- *"Differenza tra ereditarietà e composizione?"* — fragile base class, accoppiamento.
+- *"Cos'è LSP, fai un esempio di violazione."*
+- *"Differenze tra interfaccia e classe astratta dopo Java 8?"*
+- *"A cosa servono i `record`?"* — DTO immutabili, no boilerplate.
+- *"Sealed class: quando le useresti?"* — gerarchie chiuse con switch esaustivo.

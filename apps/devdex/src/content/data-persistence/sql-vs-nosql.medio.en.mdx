@@ -1,0 +1,60 @@
+# SQL vs NoSQL — Modeling
+
+## Normalize vs denormalize
+
+- **SQL**: tends to *normalize* (3NF): every fact in one place, no
+  duplication. JOIN at query time.
+- **NoSQL document**: tends to *denormalize*: data you read together stays
+  together. Very fast on reads, more complex on writes (update in N places).
+
+```js
+// MongoDB: an order is a standalone document
+{
+  _id: "ord_42",
+  user: { id: "u_1", name: "Anna" },     // copied to avoid the lookup
+  items: [
+    { sku: "ABC", qty: 2, price: 9.90 },
+    { sku: "XYZ", qty: 1, price: 49.00 }
+  ],
+  total: 68.80
+}
+```
+
+## Indexes
+
+Conceptually identical (B-tree, hash, full-text), but with specifics:
+
+- **Composite**: respect the "leftmost prefix" rule (see advanced).
+- **Partial index** (Postgres, Mongo): indexes only rows satisfying a
+  predicate.
+- **TTL index** (Mongo, Cassandra): the row is deleted after a timeout.
+- **GIN/GiST** (Postgres): full-text, JSONB, arrays.
+
+## Schema migration
+
+- SQL: `ALTER TABLE` can lock. Tools: Flyway, Liquibase. Techniques:
+  expand/contract for zero downtime.
+- NoSQL document: change shape whenever you want, but the code must handle
+  **multiple versions** of the same document (explicit `version` field).
+
+## When NoSQL truly "wins"
+
+- Massive writes with linear scalability (e.g. event-store).
+- Hierarchical data (CMS, profiles).
+- Session / result caching (Redis).
+- Graphs (Neo4j) for social, recommendations.
+- Time series (Influx, Timescale).
+
+## When NoSQL "loses" (even when it looked obvious)
+
+- Data with many "real" N-N relationships (carts ↔ products ↔ promos).
+- Ad-hoc reporting / BI: SQL + an OLAP is unbeatable.
+- Transactional constraints across documents (Mongo has multi-document since
+  4.0 but it does not scale like single-doc).
+
+## Postgres as "NoSQL"
+
+Postgres `JSONB` allows queries/indexes inside JSON. For many cases it is the
+*best of both worlds*: schema where you need it, JSON where you need
+flexibility. **Consider Postgres first** before bringing a NoSQL DB into your
+stack.

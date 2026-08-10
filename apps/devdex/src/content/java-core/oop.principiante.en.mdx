@@ -1,0 +1,109 @@
+# OOP in Java — Fundamentals
+
+**Object-Oriented Programming** is built on four pillars:
+
+1. **Encapsulation**: internal state hidden, access only through public
+   methods.
+2. **Inheritance**: a child class inherits state and behavior from the
+   parent class.
+3. **Polymorphism**: the same method signature can behave differently
+   depending on the dynamic type.
+4. **Abstraction**: expose the "what", hide the "how" (abstract classes,
+   interfaces).
+
+## A minimal class
+
+```java
+public class Account {
+    private final String iban;
+    private long balance;            // encapsulated state
+
+    public Account(String iban, long initial) {
+        this.iban = iban;
+        this.balance = initial;
+    }
+
+    public long getBalance() { return balance; }
+
+    public void deposit(long amount) {
+        if (amount <= 0) throw new IllegalArgumentException("> 0");
+        this.balance += amount;
+    }
+}
+```
+
+- `private final` for fields → encapsulation + reference immutability.
+- Constructor validates invariants (implicit here).
+- No "generic" setter: each write operation goes through a business method
+  (`deposit`).
+
+## Inheritance
+
+```java
+public class SavingsAccount extends Account {
+    private final double rate;
+
+    public SavingsAccount(String iban, long initial, double rate) {
+        super(iban, initial);        // calls the parent constructor
+        this.rate = rate;
+    }
+
+    public void applyInterest() {
+        deposit((long) (getBalance() * rate));
+    }
+}
+```
+
+> 🔑 "Is-a" rule: inherit ONLY if "B is an A". Otherwise **composition**.
+
+## Polymorphism
+
+```java
+Account a = new SavingsAccount("IT01", 100, 0.03);
+a.deposit(50);    // calls Account.deposit
+// but if SavingsAccount had @Override-d it, that version would run
+```
+
+The *static* type is `Account`, the *dynamic* type is `SavingsAccount`.
+Dispatch is **virtual**: Java uses the dynamic type for instance methods
+(not for fields, not for `static` methods).
+
+## Interfaces
+
+An **interface** defines a contract, not an implementation.
+
+```java
+public interface Notifier {
+    void notify(String message);
+}
+
+public class EmailNotifier implements Notifier {
+    public void notify(String message) { /* SMTP */ }
+}
+```
+
+Since Java 8, interfaces can have `default` and `static` methods. Since
+Java 9, also `private` (to reuse code between default methods).
+
+## Abstract class
+
+```java
+public abstract class Shape {
+    public abstract double area();
+    public void describe() {
+        System.out.println("Area = " + area());
+    }
+}
+```
+
+An abstract class can have state, constructors, concrete methods — but
+cannot be instantiated directly.
+
+## When interface, when abstract
+
+- **Interface**: define *what* a type can do. Java allows multiple type
+  inheritance.
+- **Abstract class**: share state/implementation across subclasses.
+
+> 💡 In modern practice: prefer interfaces + composition. Abstract classes are
+> useful in frameworks where a "template method" is needed.

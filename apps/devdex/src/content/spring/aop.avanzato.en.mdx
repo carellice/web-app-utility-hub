@@ -1,0 +1,161 @@
+# Advanced AOP — Weaving, performance, patterns
+
+## Compile-time vs load-time vs runtime weaving
+
+| Mode | When | Tooling | Pros | Cons |
+|---|---|---|---|---|
+| Compile-time | at build | `aspectj-maven-plugin` | max optimization | complex build |
+| Post-compile | after compile | `iajc` | weave pre-compiled jars | same as above |
+| Load-time | at classloading | JVM agent `aspectjweaver.jar` | weave closed dependencies | startup overhead |
+| Runtime (proxy) | at runtime | Spring AOP | zero extra build | limits (self-invocation) |
+
+## Performance overhead
+
+- Spring AOP (proxy): ~10–50 ns per intercepted method (after JIT warmup).
+- AspectJ weaving: near-zero (code is inlined directly).
+
+For hot paths with millions of calls per second, AspectJ is the choice. For
+99% of cases Spring AOP is enough.
+
+## What the CGLIB proxy does
+
+CGLIB generates a subclass of the target class on the fly. Each intercepted
+method is overridden with code like:
+
+```java
+public Object save(Order o) {
+    return interceptor.intercept(this, save_method, new Object[]{o}, super_save);
+}
+```
+
+To generate the subclass, the target class must have an accessible constructor
+and not be `final`. Spring 6 with AOT pre-generates these classes at build
+time for GraalVM native.
+
+## Pointcuts with annotation parameters
+
+```java
+@Around("@annotation(rateLimited) && args(userId, ..)")
+public Object limit(ProceedingJoinPoint pjp, RateLimited rateLimited, String userId)
+    throws Throwable {
+    if (!bucket(userId).tryConsume(rateLimited.cost())) {
+        throw new TooManyRequestsException();
+    }
+    return pjp.proceed();
+}
+```
+
+Combining `@annotation` + `args` enables reusable parametrized aspects.
+
+## Aspect order vs proxy chaining
+
+When there are multiple aspects on the same bean, Spring does **not** create
+N proxies: it creates **one** that wraps a chain of `MethodInterceptor`s.
+Execution order follows `@Order`.
+
+For `@Transactional` + `@Async` on the same method, be careful: `@Async`
+executes the method on another thread → the `@Transactional` is not
+propagated.
+
+## ProxyTargetClass
+
+```java
+@EnableAspectJAutoProxy(proxyTargetClass = true)
+```
+
+Forces CGLIB even if the bean implements interfaces. Useful when you want
+`@Autowired` for the concrete class to work and not just the interface.
+
+## `@AspectJ` and Spring AOP coexist
+
+You can have Spring runtime aspects + AspectJ weaving at the same time.
+Typical:
+
+- Spring AOP for `@Transactional`, `@Cacheable`.
+- AspectJ to intercept constructors or private methods (e.g. monitoring
+  integration).
+
+## Use case: per-method profiling
+
+```java
+@Aspect @Component
+public class JmxMetrics {
+    private final MeterRegistry meters;
+    public JmxMetrics(MeterRegistry m) { this.meters = m; }
+
+    @Around("@within(org.springframework.stereotype.Service)")
+    public Object measure(ProceedingJoinPoint pjp) throws Throwable {
+        String name = pjp.getSignature().getDeclaringTypeName() + "." +
+                      pjp.getSignature().getName();
+        Timer t = meters.timer("service.method", "name", name);
+        long start = System.nanoTime();
+        try {
+            return pjp.proceed();
+        } finally {
+            t.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+        }
+    }
+}
+```
+
+In Micrometer the same can be done with `@Timed`, which is essentially a
+built-in aspect.
+
+## Subtle traps
+
+### Final + CGLIB
+
+```java
+@Service
+public final class FastService {     // final → CGLIB fails
+    @Transactional public void save() { ... }
+}
+```
+
+Startup error: remove `final` or use interfaces.
+
+### Aspect on `@Component` with mandatory constructor parameters
+
+The CGLIB proxy **calls the constructor** of the target class with
+null/default values to generate the "sub-instance" before injection. Since
+Spring 4.3, `objenesis` instantiates without calling the constructor, but the
+defensive design is: **side-effect-free constructors**.
+
+### Spring AOT and GraalVM
+
+With AOT, advices and pointcuts are analyzed and proxies pre-generated.
+Pointcuts based on annotations discovered dynamically at runtime might not
+work natively: you need `RuntimeHintsRegistrar` to declare the annotations in
+play.
+
+## Real patterns where AOP shines
+
+1. **Transactions**: `@Transactional` (built-in).
+2. **Caching**: `@Cacheable` (built-in).
+3. **Security**: `@PreAuthorize` (Spring Security).
+4. **Metrics**: `@Timed`, `@Counted` (Micrometer).
+5. **Auditing**: tracking who modifies what.
+6. **Tenant context**: setting MDC/tenant per call.
+7. **Idempotency**: rejecting duplicate requests.
+
+## When an aspect is too magical
+
+Symptoms:
+
+- To understand what a method does you must trace 4 aspects.
+- Tests are hard: behavior depends on N invisible annotations.
+- Debugging gets lost in `MethodInterceptor`s.
+
+Fixes:
+
+- Explicit composition (manual Decorator) for business logic.
+- AOP for truly cross-cutting and standard concerns.
+
+## Typical interview questions
+
+- *"Does Spring AOP intercept self-invocation? Why not?"* — proxy.
+- *"AspectJ vs Spring AOP: when does one win?"* — performance, different
+  targets.
+- *"@Around vs @Before/@AfterReturning?"* — full flow control.
+- *"How would you order aspects on the same method?"* — `@Order`.
+- *"Traps with CGLIB + constructors?"* — side effects, final.

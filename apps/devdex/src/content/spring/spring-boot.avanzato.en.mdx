@@ -1,0 +1,68 @@
+# Spring Boot — Nuggets and optimizations
+
+## Auto-config diagnostics
+
+```bash
+mvn spring-boot:run -Dspring-boot.run.arguments=--debug
+```
+
+Prints a *Conditions Evaluation Report*: which auto-configs activated, which
+didn't, and **why** (which condition failed).
+
+Programmatically:
+
+```java
+public static void main(String[] args) {
+    SpringApplication.run(App.class, args)
+        .getBean(ConditionEvaluationReport.class)
+        .getConditionAndOutcomesBySource()
+        .forEach((k, v) -> System.out.println(k + " -> " + v));
+}
+```
+
+## AOT + Native (Spring 6 / Boot 3)
+
+Spring 6 has *AOT processing*: it analyzes the context at build time and
+generates source code that replaces runtime reflection/proxies. Combined with
+GraalVM, the app starts in 50–100 ms as a native binary.
+
+```bash
+./mvnw -Pnative native:compile
+```
+
+> ⚠️ Libraries that use runtime reflection must have `reflect-config.json` or
+> declare hints via `RuntimeHintsRegistrar`.
+
+## Startup time tips
+
+- `spring.main.lazy-initialization=true` → instantiate every bean lazily.
+  Useful in dev, risky in prod (errors show up on the first request).
+- `spring.jmx.enabled=false` if you don't use JMX.
+- Unused "starter" dependencies are the #1 startup killer.
+  `mvn dependency:tree` and trim.
+
+## Actuator: operational endpoints
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+```
+
+Exposes `/actuator/health`, `/actuator/metrics`, and with Micrometer pushes to
+Prometheus, Datadog, etc. **Never expose all** in production: `/heapdump`,
+`/env`, `/threaddump` are sensitive.
+
+## Configuration metadata
+
+In `META-INF/spring-configuration-metadata.json` you can document your
+properties so IntelliJ gives you autocompletion and types.
+
+## Classpath quirks
+
+Boot uses `META-INF/spring.factories` (≤ 2.x) or `AutoConfiguration.imports`
+(3.x) for discovery. A misbehaving JAR that re-declares
+`DataSourceAutoConfiguration` can blow up the context in creative ways.
+`--debug` saves the day.

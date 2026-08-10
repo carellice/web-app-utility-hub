@@ -1,0 +1,91 @@
+# Dependency Injection — Le basi
+
+**Inversion of Control (IoC)**: invece di creare le tue dipendenze, le ricevi.
+**Dependency Injection (DI)** è la tecnica concreta per implementare IoC.
+
+```java
+// Senza DI: la classe crea le sue dipendenze
+public class OrderService {
+    private final PriceRepo prices = new PriceRepo();   // accoppiamento forte
+}
+
+// Con DI: le riceve come parametro
+public class OrderService {
+    private final PriceRepo prices;
+    public OrderService(PriceRepo prices) { this.prices = prices; }
+}
+```
+
+Chi crea l'istanza di `PriceRepo` e la passa? Il **container** (Spring, CDI, Guice…).
+
+## Tre stili di iniezione
+
+```java
+// 1) Constructor injection (consigliato)
+@Service
+public class OrderService {
+    private final PriceRepo prices;
+    public OrderService(PriceRepo prices) { this.prices = prices; }
+}
+
+// 2) Setter injection
+@Service
+public class OrderService {
+    private PriceRepo prices;
+    @Autowired public void setPrices(PriceRepo prices) { this.prices = prices; }
+}
+
+// 3) Field injection (sconsigliato)
+@Service
+public class OrderService {
+    @Autowired private PriceRepo prices;
+}
+```
+
+Perché preferire la constructor injection:
+
+- I campi possono essere `final` → immutabili.
+- Le dipendenze obbligatorie sono **esplicite** (non puoi istanziare senza).
+- I test unitari non hanno bisogno di Spring: passi i mock al costruttore.
+- Niente NPE da `@Autowired` dimenticato.
+
+## Bean e Component
+
+In Spring, un "bean" è un oggetto gestito dal container. Si dichiara così:
+
+```java
+@Component                       // generico
+@Service                         // semantica: logica di business
+@Repository                      // semantica: accesso dati
+@RestController @Controller      // semantica: web layer
+@Configuration
+public class AppConfig {
+    @Bean
+    public Clock clock() { return Clock.systemUTC(); }
+}
+```
+
+`@Component` e amici → scansionati da `@ComponentScan`. `@Bean` → metodi in classi
+`@Configuration`, restituiscono l'istanza da registrare.
+
+## Risoluzione automatica
+
+```java
+public OrderService(PriceRepo prices, Clock clock) { ... }
+```
+
+Spring guarda i parametri, trova un bean compatibile per ciascun tipo e li passa. Se
+ce ne sono 2 dello stesso tipo: `@Qualifier("nome")` per disambiguare.
+
+## Lifecycle
+
+- `@PostConstruct` → chiamato dopo l'iniezione delle dipendenze.
+- `@PreDestroy` → chiamato prima della distruzione del bean.
+
+```java
+@Service
+public class CachedRepo {
+    @PostConstruct void warmup() { /* carica cache */ }
+    @PreDestroy   void shutdown() { /* flush, close */ }
+}
+```

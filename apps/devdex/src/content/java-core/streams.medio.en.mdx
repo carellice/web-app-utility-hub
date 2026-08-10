@@ -1,0 +1,59 @@
+# Stream API — Intermediate patterns
+
+## Advanced collectors
+
+```java
+Map<Department, List<Employee>> byDept = employees.stream()
+    .collect(Collectors.groupingBy(Employee::department));
+
+Map<Department, Long> count = employees.stream()
+    .collect(Collectors.groupingBy(Employee::department, Collectors.counting()));
+
+Map<Department, Double> avgSalary = employees.stream()
+    .collect(Collectors.groupingBy(
+        Employee::department,
+        Collectors.averagingDouble(Employee::salary)
+    ));
+```
+
+## Parallel streams: when
+
+`stream.parallel()` splits the source with a **Spliterator** and processes
+sub-tasks on `ForkJoinPool.commonPool()`. Worthwhile when:
+
+- **Large** dataset (at least 10k elements).
+- **CPU-bound** operations (no I/O, no DB, no network).
+- Operations with **no shared state** and **no ordering** (or
+  `.unordered()`).
+- The source splits well: `ArrayList`, array, `IntStream.range`, yes;
+  `LinkedList`, custom `Iterator`, no.
+
+```java
+long primes = IntStream.rangeClosed(2, 1_000_000)
+                       .parallel()
+                       .filter(MathUtils::isPrime)
+                       .count();
+```
+
+## reduce vs collect
+
+- `reduce` is for **immutable reductions** (sum, max, fold).
+- `collect` is for **accumulating into a mutable container** (`List`,
+  `Map`, `StringBuilder`).
+
+```java
+int sum = numbers.stream().reduce(0, Integer::sum);
+
+String csv = words.stream().collect(Collectors.joining(", ", "[", "]"));
+```
+
+## flatMap: "flatten"
+
+When each element produces *multiple* elements:
+
+```java
+List<Order> orders = ...;
+List<Item> allItems = orders.stream()
+                            .flatMap(o -> o.items().stream())
+                            .toList();
+```

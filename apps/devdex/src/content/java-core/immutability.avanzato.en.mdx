@@ -1,0 +1,61 @@
+# Immutability: under-the-hood nuggets
+
+## String Pool and intern()
+
+String literals live in a heap area called the **String Pool**. Two identical
+literals point to the same instance:
+
+```java
+String a = "hello";
+String b = "hello";
+System.out.println(a == b);          // true (same object in the pool)
+
+String c = new String("hello");
+System.out.println(a == c);          // false (object created outside the pool)
+System.out.println(a == c.intern()); // true (intern() puts it back into the pool)
+```
+
+> ⚠️ Don't abuse `intern()` on unbounded user input: it permanently occupies
+> space in the pool.
+
+## Substring and memory leak (historical)
+
+Up to Java 6 `String.substring` shared the original `char[]` array with an
+offset. If you took a small prefix of a huge string, the huge array stayed
+alive. From 1.7.0_06 onwards, `substring` copies, losing the optimization but
+avoiding the leak.
+
+## Compact Strings (Java 9+)
+
+Internally `String` is no longer `char[]` but `byte[]` with a coder
+(`LATIN1` or `UTF16`). Significant memory savings for ASCII strings (halved!).
+
+## final ≠ immutable (gotcha)
+
+`final` is *not* enough to guarantee immutability in the presence of:
+
+- **Reflection**: a `final` can be changed (see
+  `AccessibleObject.setAccessible`). For non-static `final`s, the JVM
+  **cannot** cache the value in registers because an unsafe construction
+  scenario could expose it before being set.
+- **Unsafe publication**: if the instance is exposed before the constructor
+  finishes, another thread can see it with `final` fields not yet initialized.
+  That is why the JMM defines the **initialization safety guarantee**:
+  `final` fields are guaranteed visible to other threads *only if* `this`
+  does not escape before the constructor ends.
+
+```java
+public final class Bad {
+    private final int x;
+    public Bad(EventBus bus) {
+        bus.register(this);   // ⚠️ this escapes: x may still be 0 for readers
+        this.x = 42;
+    }
+}
+```
+
+## Pattern: Builder + immutable class
+
+Pairing a mutable Builder with an immutable class is the signature of a good
+public API when parameters are many or optional (see
+`HttpRequest.newBuilder()` in `java.net.http`).

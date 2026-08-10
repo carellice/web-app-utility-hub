@@ -1,0 +1,103 @@
+# OOP in Java — Fondamenti
+
+L'**Object-Oriented Programming** è basato su quattro pilastri:
+
+1. **Encapsulation** (incapsulamento): stato interno nascosto, accesso solo tramite metodi pubblici.
+2. **Inheritance** (ereditarietà): una classe figlia eredita stato e comportamento dalla classe padre.
+3. **Polymorphism** (polimorfismo): una stessa firma di metodo può comportarsi diversamente a seconda del tipo dinamico.
+4. **Abstraction** (astrazione): esporre il "cosa", nascondere il "come" (classi astratte, interfacce).
+
+## Una classe minimale
+
+```java
+public class Account {
+    private final String iban;
+    private long balance;            // stato incapsulato
+
+    public Account(String iban, long initial) {
+        this.iban = iban;
+        this.balance = initial;
+    }
+
+    public long getBalance() { return balance; }
+
+    public void deposit(long amount) {
+        if (amount <= 0) throw new IllegalArgumentException("> 0");
+        this.balance += amount;
+    }
+}
+```
+
+- `private final` per i campi → incapsulamento + immutabilità del riferimento.
+- Costruttore valida invarianti (qui implicite).
+- Nessun setter "generico": ogni operazione di scrittura passa per un metodo di business (`deposit`).
+
+## Ereditarietà
+
+```java
+public class SavingsAccount extends Account {
+    private final double rate;
+
+    public SavingsAccount(String iban, long initial, double rate) {
+        super(iban, initial);        // chiama il costruttore padre
+        this.rate = rate;
+    }
+
+    public void applyInterest() {
+        deposit((long) (getBalance() * rate));
+    }
+}
+```
+
+> 🔑 Regola "is-a": eredita SOLO se "B è una A". Altrimenti **composizione**.
+
+## Polimorfismo
+
+```java
+Account a = new SavingsAccount("IT01", 100, 0.03);
+a.deposit(50);    // chiama Account.deposit
+// ma se SavingsAccount avesse fatto @Override, sarebbe la sua versione
+```
+
+Il tipo *statico* è `Account`, il tipo *dinamico* è `SavingsAccount`. La dispatch è
+**virtuale**: Java va sul tipo dinamico per i metodi di istanza (non per i campi né
+per i metodi `static`).
+
+## Interfacce
+
+Un'**interfaccia** definisce un contratto, non un'implementazione.
+
+```java
+public interface Notifier {
+    void notify(String message);
+}
+
+public class EmailNotifier implements Notifier {
+    public void notify(String message) { /* SMTP */ }
+}
+```
+
+Da Java 8, le interfacce possono avere `default` e `static` methods. Da Java 9, anche
+`private` (per riusare codice fra default methods).
+
+## Abstract class
+
+```java
+public abstract class Shape {
+    public abstract double area();
+    public void describe() {
+        System.out.println("Area = " + area());
+    }
+}
+```
+
+Una classe astratta può avere stato, costruttori, metodi concreti — ma non può essere
+instanziata direttamente.
+
+## Quando interfaccia, quando astratta
+
+- **Interfaccia**: definisci *cosa* sa fare un tipo. Java consente multiple inheritance di tipo.
+- **Abstract class**: condividi stato/implementazione tra sottoclassi.
+
+> 💡 Nella pratica moderna: preferisci interfacce + composizione. Le abstract class
+> sono utili nei framework dove serve un "template method".

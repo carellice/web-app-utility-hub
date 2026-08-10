@@ -1,0 +1,195 @@
+# JVM internals — Advanced
+
+## Java Memory Model (JMM)
+
+The JMM defines **what a thread is allowed to see of modifications made by
+another thread**. Without synchronization, no guarantees:
+
+```java
+boolean ready = false;
+int data = 0;
+
+// thread A
+data = 42;
+ready = true;
+
+// thread B
+if (ready) System.out.println(data);   // may print 0!
+```
+
+Modern CPUs reorder operations and caches are per-core. To guarantee visibility:
+`volatile`, `synchronized`, locks, `VarHandle`.
+
+### happens-before
+
+Key rules:
+
+- `unlock` happens-before a subsequent `lock` on the same monitor.
+- A `volatile` write happens-before a read of the same variable.
+- A `start()` call happens-before the actions of the started thread.
+- The constructor happens-before the finalizer.
+- All actions in a thread are in *program order*.
+
+### Final field safety
+
+`final` fields are guaranteed visible to other threads if `this` does not escape
+before the constructor completes. Records are "safely published by default".
+
+## Intrinsic lock and biased locking
+
+Every object has a mark word in its header carrying the lock state. States:
+
+1. **Unlocked** (no contention).
+2. **Biased** (≤ Java 14, deprecated): first thread owns without CAS.
+3. **Thin lock** (lightweight CAS for uncontended).
+4. **Fat lock** (monitor with OS mutex for contention).
+
+Since Java 15+, biased locking is disabled (overhead vs marginal gain).
+
+## Volatile vs synchronized
+
+| | volatile | synchronized |
+|---|---|---|
+| Visibility | yes | yes |
+| Compound atomicity | no (e.g. `i++`) | yes |
+| Reentrant | n/a | yes |
+| Performance | very low overhead | lock acquisition |
+
+`volatile long` on 32-bit JVMs: since Java 5 it is guaranteed atomic even for
+64-bit; without `volatile`, it is not.
+
+## VarHandle (Java 9+)
+
+Replaces `sun.misc.Unsafe` for atomic operations:
+
+```java
+private static final VarHandle COUNT;
+static {
+    try {
+        COUNT = MethodHandles.lookup().findVarHandle(Counter.class, "count", int.class);
+    } catch (ReflectiveOperationException e) { throw new ExceptionInInitializerError(e); }
+}
+
+public void inc() { COUNT.getAndAdd(this, 1); }
+```
+
+Public API for CAS, explicit ordering (acquire/release/opaque/plain).
+
+## False sharing
+
+Two variables in different cache lines (64 bytes) do not affect each other. Same
+cache line + concurrent writes = **false sharing** = cache invalidation, perf
+collapses.
+
+```java
+@Contended       // since Java 8, requires -XX:-RestrictContended
+private long x;
+```
+
+Adds padding to separate variables.
+
+## Compressed oops
+
+On 64-bit JVMs with heap ≤ 32 GB, object pointers are compressed to 32 bits
+(shift 3 → max 32 GB addressable). Beyond 32 GB: every pointer doubles, +50%
+memory for objects full of references.
+
+Sweet spot: heap < 32 GB when possible. For larger heaps, ZGC and Shenandoah
+have more modern techniques.
+
+## ZGC (Z Garbage Collector)
+
+- Concurrent: most work done while the app runs.
+- Region-based: heap divided into regions.
+- Colored pointers: bits in the pointer for state (concurrent marking).
+- Sub-millisecond pauses even with multi-TB heaps.
+
+Trade-off: throughput slightly below G1 under steady-state loads.
+
+## GraalVM native image
+
+```bash
+native-image -jar app.jar
+```
+
+- Closed-world: the whole classpath analyzed at build time.
+- AOT compilation into a native binary.
+- No JVM: no runtime classloader, no JIT.
+- Reflection / proxies / serialization need explicit metadata.
+
+Use cases: serverless, CLI, microservices with fast startup.
+
+Costs: long build time (minutes), peak throughput below HotSpot JVM.
+
+## Project Leyden (preview 2025+)
+
+Initiative to reduce startup and footprint without giving up the JIT:
+
+- **CDS (Class Data Sharing)** already exists.
+- **Application CDS**: dump a custom classpath.
+- **AOT cache**: JIT-compiled code saved across runs.
+- Goal: ~50 ms startup even for large apps.
+
+## Threading: virtual threads (Project Loom)
+
+Java 21+:
+
+```java
+Thread.startVirtualThread(() -> doWork());
+
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    IntStream.range(0, 10_000).forEach(i -> executor.submit(() -> http.get(...)));
+}
+```
+
+- Thousands of "virtual" threads on a few OS carrier threads.
+- Blocking becomes "parking" without wasting an OS thread.
+- `synchronized` pre-Java 24 *pinned* the carrier; fixed in 24+.
+
+Implications:
+
+- No more giant connection pools for IO.
+- ThreadLocal still works, but with virtual threads can be costly (frequent
+  allocation).
+- ScopedValue (Java 21+) is the preferred evolution.
+
+## Advanced ClassLoader
+
+OSGi, modular, plugin systems use hierarchical/parental-delegation classloaders.
+Pitfalls:
+
+- **Memory leak** when a classloader stays up after webapp undeploy (classic
+  hotspot war): static reference from a JDK class to the webapp.
+- **Class.forName** + reflection: risk of not finding the class if called from
+  the wrong CL.
+- **ServiceLoader**: the "platform" way to do discovery
+  (`META-INF/services`).
+
+## JFR custom events
+
+```java
+@Name("App.OrderCreated")
+@Category("App")
+public class OrderCreatedEvent extends Event {
+    @Label("Order ID") public String id;
+    @Label("Total") public double total;
+}
+
+OrderCreatedEvent e = new OrderCreatedEvent();
+e.id = "o42"; e.total = 9.9; e.commit();
+```
+
+Custom events visible in JMC with very low overhead → internal observability
+without logs.
+
+## Typical interview questions
+
+- *"What is the JIT? C1 vs C2 difference?"*
+- *"Explain the JVM memory areas."*
+- *"What is happens-before in the JMM?"*
+- *"Volatile vs synchronized vs AtomicLong?"*
+- *"What does escape analysis do?"*
+- *"When would you use ZGC?"*
+- *"What changes with virtual threads vs platform threads?"*
+- *"Difference between compressed and non-compressed oops?"*
+- *"OutOfMemoryError: kinds and common causes?"*

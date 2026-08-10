@@ -1,0 +1,119 @@
+# DI — Scopes, qualifiers, configuration
+
+## Bean scopes
+
+| Scope | When |
+|---|---|
+| `singleton` (default) | a single instance in the container |
+| `prototype` | a new instance per injection |
+| `request` (web) | one per HTTP request |
+| `session` (web) | one per user session |
+| `application` (web) | one per ServletContext |
+| `websocket` | one per WebSocket session |
+
+```java
+@Component
+@Scope("prototype")
+public class FreshPipeline { ... }
+```
+
+> ⚠️ Injecting a prototype into a singleton → the same instance is reused.
+> Fixes: `@Lookup`, `ObjectProvider<T>`, scoped proxy.
+
+## Multiple implementations: @Qualifier
+
+```java
+public interface Notifier { void send(String m); }
+
+@Service @Qualifier("email")
+class EmailNotifier implements Notifier { ... }
+
+@Service @Qualifier("sms")
+class SmsNotifier implements Notifier { ... }
+
+@Service
+class AlertService {
+    public AlertService(@Qualifier("email") Notifier notifier) { ... }
+}
+```
+
+Alternative: `@Primary` on one implementation (the default), the others
+requested via `@Qualifier`.
+
+## Conditional beans
+
+```java
+@Bean
+@ConditionalOnProperty(name = "feature.x.enabled", havingValue = "true")
+public XService xService() { ... }
+
+@Bean
+@ConditionalOnMissingBean
+public Clock clock() { return Clock.systemUTC(); }
+```
+
+The `@Conditional*` family is the engine of Spring Boot auto-configuration.
+
+## A list of all beans of a type
+
+```java
+public AlertService(List<Notifier> all) {
+    all.forEach(n -> n.send("hello"));
+}
+
+// or a map keyed by bean name:
+public AlertService(Map<String, Notifier> byName) { ... }
+```
+
+Useful for the Strategy pattern.
+
+## @Configuration: full vs lite
+
+A `@Configuration` class is **proxied** by CGLIB: `@Bean` methods call other
+`@Bean` methods *without* duplication. This is the "full" mode.
+
+```java
+@Configuration
+public class Cfg {
+    @Bean public Foo foo() { return new Foo(); }
+    @Bean public Bar bar() { return new Bar(foo()); }  // reuses the same Foo
+}
+```
+
+With `@Configuration(proxyBeanMethods = false)` (lite) no proxy: `foo()` is
+called as a regular method → 2 distinct Foo objects. Lite = faster startup.
+
+## ObjectProvider and Optional
+
+For optional dependencies:
+
+```java
+public OrderService(ObjectProvider<Cache> cacheProvider) {
+    this.cache = cacheProvider.getIfAvailable(); // null if absent
+}
+
+// or:
+public OrderService(Optional<Cache> cache) { ... }
+```
+
+## Profiles
+
+```java
+@Service
+@Profile("prod")
+public class ProdEmailNotifier implements Notifier { ... }
+
+@Service
+@Profile({"dev", "test"})
+public class LogNotifier implements Notifier { ... }
+```
+
+Activation: `--spring.profiles.active=prod`.
+
+## Circular? Spring 2.6+
+
+Since 2.6, dependency cycles are **disabled** by default. Fixes:
+
+1. Redesign (preferred).
+2. Use `@Lazy` on one of the two dependencies.
+3. `spring.main.allow-circular-references=true` (discouraged).

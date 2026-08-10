@@ -1,0 +1,72 @@
+# Stream API — Nuggets under the hood
+
+## Spliterator: the heart of parallel streams
+
+When you call `.parallel()`, the framework takes the source's
+**Spliterator** and repeatedly calls `trySplit()` to break the work into
+sub-tasks. Split quality depends on declared *characteristics*: `SIZED`,
+`SUBSIZED`, `ORDERED`, `SORTED`, `DISTINCT`, `IMMUTABLE`, `CONCURRENT`,
+`NONNULL`.
+
+- `ArrayList` → Spliterator `SIZED | SUBSIZED | ORDERED` → splits very well.
+- `LinkedList` → non-sized Spliterator, splits poorly → not useful in
+  parallel.
+
+## The `commonPool` is shared (and that is a problem)
+
+All parallel streams in the JVM use the same `ForkJoinPool.commonPool()`. If
+your business code and a library both use it heavily, they slow each other
+down. To isolate:
+
+```java
+ForkJoinPool custom = new ForkJoinPool(4);
+custom.submit(() -> data.parallelStream()
+                         .filter(...)
+                         .toList()
+).get();
+```
+
+> Trick based on an implementation detail: the framework looks at the current
+> `ForkJoinTask` to choose the pool. Documented as stable from Java 9
+> onward, but use consciously.
+
+## Pipeline fusion
+
+Intermediate operations are not executed "one at a time over the whole
+collection". They are **fused**: for each element, they traverse the entire
+pipeline up to the terminal, then move on to the next. This enables
+short-circuit operations (`findFirst`, `anyMatch`, `limit`) to skip the
+rest.
+
+```java
+boolean any = giants.stream()
+    .filter(g -> {
+        System.out.println("filter " + g.name());
+        return g.weight() > 1000;
+    })
+    .anyMatch(g -> g.height() > 200);
+// only prints until it finds the first one satisfying both predicates
+```
+
+## peek is not for "official" debug
+
+`peek` does not guarantee it will be invoked for every element: with a
+short-circuit stream, the JVM may skip invoking it on elements "discarded
+downstream".
+
+## Stateful vs stateless
+
+Operations like `sorted`, `distinct`, `limit` are **stateful**: they need to
+"see" multiple elements before proceeding. In parallel this costs: `sorted`
+on a parallel stream must buffer + merge.
+
+## Hidden boxing
+
+`stream().map(x -> x.qty()).sum()` does not compile: `sum()` does not exist
+on `Stream<Integer>`. You must go through `mapToInt`:
+
+```java
+int total = items.stream().mapToInt(Item::qty).sum();
+```
+
+Otherwise every `int` gets boxed/unboxed → allocation and GC cost.

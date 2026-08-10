@@ -1,0 +1,59 @@
+# Microservizi — Design
+
+## Bounded context (Domain-Driven Design)
+
+Il taglio dei servizi segue i **bounded context** del dominio: una sotto-area di
+linguaggio omogeneo. *Order* in checkout è diverso da *Order* in logistica: vivono in
+servizi diversi.
+
+Strumenti utili: **Event Storming** (workshop), **Context Mapping**.
+
+## Database per servizio
+
+Ogni microservizio possiede il **suo** schema/DB. Niente JOIN cross-servizio.
+
+```text
+Orders DB   ←  Orders service
+Payments DB ←  Payments service
+```
+
+Se ti viene voglia di fare JOIN tra DB, è il sintomo che il taglio è sbagliato.
+
+## Comunicazione: stili
+
+| Stile | Esempio | Pro | Contro |
+|---|---|---|---|
+| Sync request/reply | REST, gRPC | semplicità, debug | accoppia disponibilità, latenza |
+| Async event-driven | Kafka, RabbitMQ | resilienza, disaccoppiamento | complessità, ordine, idempotenza |
+| Async point-to-point | Code SQS | semplice, garanzie note | meno fan-out |
+| CDC (Change Data Capture) | Debezium | reattivo agli stati DB | accoppia allo schema DB |
+
+## Resilienza
+
+- **Timeout**: ogni call deve averne uno (default `infinite` = morte).
+- **Retry con backoff**: per chiamate idempotenti.
+- **Circuit breaker** (Resilience4j, Hystrix in pensione): se un servizio è giù, smetti
+  di chiamarlo e fail-fast.
+- **Bulkhead**: pool separati per ogni dipendenza, così una saturazione non rovina
+  tutte.
+
+```java
+@CircuitBreaker(name = "payments", fallbackMethod = "cached")
+public Payment charge(...) { ... }
+```
+
+## Observability: 3 pilastri
+
+1. **Logs** strutturati (JSON) con correlation-id (traceId).
+2. **Metrics** (Prometheus, Micrometer): latenza p50/p95/p99, error rate, RPS.
+3. **Tracing** distribuito (OpenTelemetry): segui una request attraverso N servizi.
+
+## API contract
+
+Il "contratto" tra servizi è critico. Strumenti:
+
+- **OpenAPI** per REST.
+- **Protobuf** per gRPC.
+- **AsyncAPI** per eventi.
+- **Consumer-driven contracts** (Pact, Spring Cloud Contract): il consumer pubblica le
+  sue aspettative, il producer le verifica in CI.

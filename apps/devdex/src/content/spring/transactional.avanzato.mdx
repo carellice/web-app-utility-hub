@@ -1,0 +1,66 @@
+# @Transactional — Chicche e trappole
+
+## Come funziona davvero il proxy
+
+Spring crea un proxy del bean (CGLIB se la classe non implementa interfacce, JDK proxy
+altrimenti). Le chiamate **esterne** passano per il proxy, che gestisce
+`PlatformTransactionManager` (apertura connessione, commit, rollback).
+
+```text
+  client → proxy ── @Transactional advice ── target.method()
+```
+
+Per questo:
+
+- **Self-invocation** non funziona (vedi livello base).
+- Metodi **private**, **final** (su CGLIB), **static** non sono intercettati.
+- Le interfacce di default tengono il proxy JDK; se metti `@Transactional` sull'interfaccia,
+  l'implementazione deve essere caricata via interfaccia.
+
+## Workaround per self-invocation
+
+1. **Estrai** il metodo in un altro bean.
+2. **Iniettati da te stesso** via `ApplicationContext.getBean(this.getClass())`.
+3. Forza il **modo proxy AspectJ** (`@EnableTransactionManagement(mode = AspectJ)`)
+   con weaving: AspectJ intercetta a livello bytecode, anche self-invocation.
+
+## Thread-local context
+
+La tx è agganciata al `Thread` corrente (via `TransactionSynchronizationManager`).
+Se passi a un altro thread (es. `@Async`, `CompletableFuture.supplyAsync(...)`), perdi
+la transazione. Per propagarla, ti serve passare manualmente la connessione o usare
+`TransactionTemplate` nel nuovo thread.
+
+## Spring's "noRollbackOnly" classic trap
+
+Se un metodo `@Transactional` cattura un'eccezione che doveva fare rollback, **la
+transazione è già marcata rollback-only** dall'advice. Al commit ottieni
+`UnexpectedRollbackException`. Mai catturare e ingoiare senza propagare/`setRollbackOnly`.
+
+```java
+@Transactional
+public void run() {
+    try {
+        repo.save(x);
+        someBean.callThatFails();   // ⚠️ se è transazionale anch'essa e tira eccezione,
+                                    //     marca rollback-only nel TX corrente
+    } catch (Exception ignored) { /* rollback-only resta attivo */ }
+    // commit qui → UnexpectedRollbackException
+}
+```
+
+## Performance: connection pool
+
+Una transazione = una **connessione "presa" dal pool** finché non chiude. Metodi
+lunghi `@Transactional` (es. con chiamate REST esterne dentro) sono il modo migliore
+per esaurire HikariCP. **Mai fare I/O esterno dentro una transazione DB.**
+
+## Pattern: outbox transazionale
+
+Per pubblicare eventi affidabili dopo un commit DB:
+
+1. In transazione: scrivi sia la riga di business sia un evento in tabella `outbox`.
+2. Un job legge `outbox` e pubblica sul broker, marcando come "sent".
+
+Spring 5+ ha `TransactionalEventListener` con `phase = AFTER_COMMIT`, ma garantisce
+solo *best effort* (non resiste a crash JVM): se hai bisogno di garanzie hard, outbox.

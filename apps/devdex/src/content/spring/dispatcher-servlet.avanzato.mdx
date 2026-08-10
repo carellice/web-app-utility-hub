@@ -1,0 +1,165 @@
+# DispatcherServlet — Internals, performance, avanzato
+
+## Inizializzazione (Spring Boot embedded)
+
+1. `ServletWebServerApplicationContext` parte e crea un `WebServer` (Tomcat).
+2. Tomcat espone il `ServletContext`.
+3. `DispatcherServletAutoConfiguration` registra il `DispatcherServlet` e i suoi bean.
+4. Al primo accesso (o se `loadOnStartup > 0`), `init()` viene chiamato:
+   - Crea il `WebApplicationContext` (figlio del Root).
+   - Carica `HandlerMapping`, `HandlerAdapter`, etc.
+
+In Spring Boot, `DispatcherServletRegistrationBean` imposta `loadOnStartup=-1` o
+configurabile via `spring.mvc.servlet.load-on-startup`.
+
+## Thread model: 1 thread per request
+
+Servlet Tomcat usa pool di thread:
+
+```yaml
+server:
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+    accept-count: 100
+    max-connections: 10000
+```
+
+Ogni request "occupa" un thread Tomcat finché non viene scritta la response. Se il
+controller fa I/O lungo, il thread è bloccato. Pool esaurito → request in
+`accept-count`. Saturato → connection rifiutate.
+
+## Async tutto il flow
+
+```java
+@GetMapping("/orders/{id}")
+public CompletableFuture<Order> get(@PathVariable long id) {
+    return service.findAsync(id);
+}
+```
+
+Spring rilascia il thread Tomcat finché la future completa. Tomcat ha una "async
+servlet" interna che gestisce il completion.
+
+Configurazione:
+
+```yaml
+spring:
+  mvc:
+    async:
+      request-timeout: 30000  # ms
+```
+
+## Virtual Threads (Java 21+) + Spring Boot 3.2+
+
+```yaml
+spring:
+  threads:
+    virtual:
+      enabled: true
+```
+
+Ogni request gira su un **virtual thread**. I/O bloccante non occupa carrier thread.
+Codice imperativo torna a essere ottimale. Sostituisce, in molti casi, l'asincronia
+manuale.
+
+## Performance: dove guardare
+
+- **Latenza per request**: distribuito tra middleware + controller + serializzazione.
+- **Saturazione del pool Tomcat**: `tomcat.threads.busy` metric (Micrometer).
+- **Tempo Jackson**: per JSON grossi domina la latenza; considera streaming.
+- **CORS preflight**: una richiesta in più per ogni POST cross-origin.
+
+## Streaming response
+
+```java
+@GetMapping("/feed")
+public ResponseEntity<StreamingResponseBody> feed() {
+    StreamingResponseBody body = out -> {
+        for (var line : repo.stream()) {
+            out.write((line + "\n").getBytes());
+            out.flush();
+        }
+    };
+    return ResponseEntity.ok().header("Content-Type", "application/jsonl").body(body);
+}
+```
+
+Niente accumulo memoria, ideale per export grandi. Non bufferizzare a monte (Tomcat
+buffer di default 8 KB).
+
+## ServletWebServerInitializer vs main()
+
+Per deployment "war" in container esterno:
+
+```java
+public class App extends SpringBootServletInitializer {
+    @Override
+    protected SpringApplicationBuilder configure(SpringApplicationBuilder b) {
+        return b.sources(App.class);
+    }
+}
+```
+
+Boot rileva il war, non avvia un Tomcat embedded e si lascia avviare dal container.
+Pratica residuale: gli stack moderni preferiscono executable jar.
+
+## Servlet 6 (Jakarta EE 10) e Spring 6
+
+Da Spring 6 / Boot 3: namespace `jakarta.servlet.*` invece di `javax.servlet.*`.
+Migrazioni da Spring 5 → 6 richiedono refactor di import.
+
+## Multipart upload
+
+```yaml
+spring:
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+      enabled: true
+```
+
+```java
+@PostMapping(value = "/upload", consumes = MULTIPART_FORM_DATA_VALUE)
+public ResponseEntity<Void> upload(@RequestParam MultipartFile file) {
+    storage.save(file);
+    return ResponseEntity.accepted().build();
+}
+```
+
+Tomcat scrive il file temporaneamente in `java.io.tmpdir`. Per upload grandi, lo
+streaming con `InputStream`/`Servlet 3.1 Async I/O` è migliore.
+
+## Trappole
+
+- **OpenSessionInView** (JPA): il flush si fa nella view → query a sorpresa nei
+  template. Disabilita con `spring.jpa.open-in-view=false`.
+- **Eccezione in `@ExceptionHandler` stesso**: cade nel fallback default,
+  status 500. Tieni il handler semplice.
+- **HttpMessageNotReadableException con Jackson 2 strict mode**: configura
+  `FAIL_ON_UNKNOWN_PROPERTIES = false` se vuoi forward-compat.
+- **CORS dietro a un gateway**: spesso il gateway già aggiunge gli headers; non
+  duplicarli nel servizio (header duplicati = browser rifiuta).
+
+## WebMvc vs WebFlux
+
+| | WebMvc | WebFlux |
+|---|---|---|
+| Modello | thread-per-request (servlet) | event-loop (Netty) |
+| Streaming | possibile | nativo |
+| Backpressure | no | sì (Reactor) |
+| Java 21 + VT | molto buono | aggiunge poco |
+| Curva di apprendimento | bassa | alta |
+
+Con virtual threads, WebMvc è la scelta predefinita per la maggior parte dei nuovi
+progetti.
+
+## Domande tipiche al colloquio
+
+- *"Cos'è la DispatcherServlet e dove si inserisce nello stack Servlet?"*
+- *"Pipeline di una request in Spring MVC?"*
+- *"Differenza tra Filter, Interceptor e Aspect?"*
+- *"Come gestiresti un endpoint che fa una query lenta senza saturare Tomcat?"* — async, virtual threads, reactive.
+- *"@ControllerAdvice vs HandlerExceptionResolver: chi vince?"* — il primo è una specializzazione del secondo.

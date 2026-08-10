@@ -1,0 +1,77 @@
+# ACID — Nuggets and distributed systems
+
+## Durability: how does the DB stay "durable"?
+
+The universal pattern is **WAL (Write-Ahead Log)**: before modifying data-file
+pages, the DB writes a sequential log to disk and `fsync()`s it. On `COMMIT`,
+it guarantees the log is on disk. If the machine crashes, on restart it replays
+the log starting from the last checkpoint.
+
+- PostgreSQL: WAL in `pg_wal/`.
+- MySQL InnoDB: redo log in `ib_logfile*`.
+- Cassandra: commit log.
+
+Trick: `fsync` is expensive. Clustered DBs avoid fsync-ing per transaction by
+forcing "group commit", which batches multiple transactions together.
+
+## Isolation in distributed: linearizability vs serializability
+
+On a single-node DB, "serializable" is enough. In a distributed system you
+have two orthogonal properties:
+
+- **Linearizability**: reads always see the latest committed value (real
+  time).
+- **Serializability**: execution is equivalent to *some* serial order (not
+  necessarily real-time).
+
+Together they form **strict serializability**. CRDB, Spanner, FoundationDB
+achieve it; many NoSQL systems don't.
+
+## CAP theorem (and why it is incomplete)
+
+Under network **Partition**, you must choose between:
+
+- **Consistency** (strong).
+- **Availability**.
+
+In practice `PACELC` refines it: even **without** a partition, you must choose
+between **Latency** and **Consistency**.
+
+## ACID vs BASE
+
+The historical antagonism:
+
+- ACID: guarantees strong consistency, at a scalability cost.
+- BASE (Basically Available, Soft state, Eventual consistency): relaxes
+  consistency, at the cost of application complexity (handle conflicts,
+  retries, idempotency).
+
+Modern distributed SQL systems (CockroachDB, YugabyteDB, Spanner) try to deliver
+**global** ACID, paying in latency.
+
+## Saga pattern
+
+When a "business transaction" spans multiple microservices (different DBs),
+you can't use classic ACID. You use a **saga**: a chain of local actions +
+compensating action if a subsequent one fails.
+
+```text
+Order → Payment → Inventory → Shipping
+            ↓ (fail)
+        Compensate: release stock, cancel payment
+```
+
+Choreography (events) vs orchestration (central orchestrator: Temporal,
+Camunda, Spring Cloud Sleuth + Workflow).
+
+## Outbox + idempotency keys
+
+To publish events reliably after a commit (see advanced @Transactional),
+combined with an **idempotency key** on the consumer side to reprocess without
+side effects.
+
+## Read replicas and lag
+
+A read replica is usually **eventually consistent**: after an INSERT, a read
+from the replica may not see it (replication lag). For "read your own writes"
+use "session pinning" to the primary for N seconds after a write.

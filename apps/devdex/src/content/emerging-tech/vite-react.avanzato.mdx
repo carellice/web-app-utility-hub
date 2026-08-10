@@ -1,0 +1,176 @@
+# Vite + React — Internals e ottimizzazione avanzata
+
+## Perché Vite è velocissimo in dev
+
+### Pre-bundling con esbuild
+
+Al primo avvio (`vite dev`), Vite esegue **esbuild** (scritto in Go, ~10–100x più veloce di Rollup/Webpack) per:
+
+- Convertire dipendenze CommonJS → ESM.
+- Mergiare moduli con tanti file (es. lodash con 600 file) in un unico chunk → meno
+  request browser.
+
+Output cachato in `node_modules/.vite/`.
+
+### Dev server "no bundle"
+
+Per il tuo codice sorgente, Vite non bundle: serve i moduli on-demand via HTTP. Il
+browser fa `import { Foo } from '/src/Foo.jsx'`, Vite trasforma JSX al volo (esbuild)
+e risponde.
+
+Vantaggi:
+
+- Boot time costante anche su progetti enormi.
+- HMR proporzionale a quanto cambi, non a quanto hai.
+
+### HMR fine-grained
+
+```js
+// nel modulo:
+if (import.meta.hot) {
+  import.meta.hot.accept((newModule) => {
+    /* aggiorna stato locale */
+  });
+}
+```
+
+Il React plugin gestisce questo automaticamente con Fast Refresh.
+
+## Build di produzione
+
+In `vite build`, Vite usa **Rollup** (più maturo nelle ottimizzazioni di esbuild):
+
+- Tree-shaking.
+- Code splitting.
+- Minification con esbuild (default) o Terser.
+- CSS code splitting per chunk.
+
+```bash
+vite build --minify=terser
+```
+
+## Performance budget
+
+Su un progetto serio, monitora:
+
+- JS gzip per landing page: < 100 KB target.
+- Time-to-interactive (TTI): < 3.5s su 3G.
+- Largest Contentful Paint (LCP): < 2.5s.
+
+Strumenti: Lighthouse CI, WebPageTest, SpeedCurve, Bundlesize.
+
+## Server-Side Rendering (SSR)
+
+Vite supporta SSR nativamente:
+
+```js
+// server.js
+const { render } = await vite.ssrLoadModule('/src/entry-server.jsx');
+const html = await render(url);
+```
+
+Soluzioni high-level: **Vike** (ex vite-plugin-ssr), **Next.js** (Webpack/Turbopack),
+**Remix**, **Astro**.
+
+In React 19 + RSC (React Server Components): pattern emergente che mescola
+server/client. Vite ha plugin sperimentali; ecosistema Next.js più maturo.
+
+## Plugins API
+
+```js
+export default function myPlugin() {
+  return {
+    name: 'my-plugin',
+    transform(code, id) {
+      if (id.endsWith('.foo')) return { code: transform(code), map: null };
+    },
+    handleHotUpdate(ctx) { ... },
+  };
+}
+```
+
+Vite usa l'API di Rollup → la maggior parte dei plugin Rollup funziona. Hook
+specifici Vite per dev server (`configureServer`, `transformIndexHtml`).
+
+## Worker / SharedWorker
+
+```js
+import MyWorker from './my-worker.js?worker';
+const worker = new MyWorker();
+```
+
+Vite gestisce import dei worker, bundling separato.
+
+## WASM e top-level await
+
+Supportati out-of-the-box (richiede Chromium recente).
+
+```js
+import init, { compute } from './math.wasm?init';
+await init();
+console.log(compute(42));
+```
+
+## Image optimization
+
+Plugin: `vite-imagetools`, `vite-plugin-image-optimizer`.
+
+```jsx
+import logo from './logo.png?w=800;1200&format=webp;avif&as=picture';
+
+<img srcSet={logo.srcSet} sizes="..." />
+```
+
+## Migrare da CRA
+
+CRA è deprecato. Migrazione:
+
+1. `npm create vite@latest`.
+2. Spostare `public/index.html` in root, sostituire `%PUBLIC_URL%` con `/`.
+3. Cambiare `process.env.REACT_APP_*` in `import.meta.env.VITE_*`.
+4. Adattare service worker / PWA (vite-plugin-pwa).
+5. Verificare i file `.jsx` (CRA accetta JSX in `.js`, Vite prefer `.jsx`).
+
+## Bundler war 2025-2026
+
+- **Webpack**: storico, ancora forte (Next.js v < 15).
+- **Vite**: dominante in SPA "vanilla".
+- **Turbopack** (Vercel/Next.js): Rust, ambizioso, in maturazione.
+- **Rspack**: porting Rust di Webpack, API compatibile.
+- **Bun**: bundler integrato, ESM-first, performance al limite.
+
+Vite resta la scelta predefinita per il 90% dei nuovi progetti React SPA non-Next.
+
+## Caching CI/CD
+
+```yaml
+# GitHub Actions
+- uses: actions/cache@v4
+  with:
+    path: |
+      ~/.npm
+      node_modules
+      node_modules/.vite
+    key: ${{ runner.os }}-vite-${{ hashFiles('package-lock.json') }}
+```
+
+`node_modules/.vite/` è il pre-bundle: cacharlo accelera molto.
+
+## Trappole comuni
+
+- **Mixed CJS/ESM dipendenze**: Vite cerca di convertirle, ma alcune fail. Soluzione:
+  `optimizeDeps.include = [...]` o passare a forks ESM-friendly.
+- **Globali `process`/`Buffer`** non esistono in browser. Usa `vite-plugin-node-polyfills`
+  con cautela.
+- **Asset path in production**: usa `import.meta.env.BASE_URL` se servi sotto `/app/`.
+- **Dev funziona, build no**: differenza esbuild vs Rollup tree-shaking. Controlla
+  side effect dichiarati in package.json delle dipendenze.
+
+## Domande tipiche al colloquio
+
+- *"Perché Vite è più veloce di Webpack in dev?"* — ESM nativo, esbuild, no bundle.
+- *"Cosa fa Vite a build time?"* — Rollup + esbuild minify.
+- *"Pre-bundling con esbuild: cosa risolve?"*
+- *"Come gestisci code splitting con React + Vite?"*
+- *"CRA → Vite: cosa cambia per env vars?"*
+- *"Quando Next.js / Remix / Astro sono preferibili a Vite SPA?"* — SSR/SSG/RSC.

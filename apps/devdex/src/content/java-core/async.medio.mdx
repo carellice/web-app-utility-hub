@@ -1,0 +1,43 @@
+# CompletableFuture: comporre lavoro asincrono
+
+```java
+CompletableFuture<User>  user  = api.getUserAsync(id);
+CompletableFuture<Cart>  cart  = api.getCartAsync(id);
+
+CompletableFuture<Receipt> recipe = user.thenCombine(cart, this::buildReceipt);
+recipe.thenAccept(this::sendEmail)
+      .exceptionally(ex -> { log.error("oops", ex); return null; });
+```
+
+## Operatori chiave
+
+| Operatore | Cosa fa |
+|---|---|
+| `thenApply(fn)`  | trasforma il risultato (`T -> R`) |
+| `thenAccept(c)`  | consuma il risultato (`T -> void`) |
+| `thenRun(r)`     | esegue un Runnable a completamento |
+| `thenCompose(fn)`| flatMap: `T -> CompletableFuture<R>` |
+| `thenCombine(other, bi)` | combina 2 future |
+| `allOf(...)` / `anyOf(...)` | aggregano N future |
+| `exceptionally(fn)` | recovery da eccezioni |
+| `handle(fn)`     | (T, Throwable) -> R |
+
+## Async vs non-Async
+
+Ogni metodo `thenX` ha una variante `thenXAsync`:
+
+- `thenApply(fn)` esegue **sullo stesso thread** che ha completato la future precedente.
+- `thenApplyAsync(fn)` fa il submit del callback su un Executor (default:
+  `ForkJoinPool.commonPool()`). Importante quando il callback è "pesante" e non vuoi
+  occupare il thread che ha completato (es. il thread I/O del client HTTP).
+
+```java
+future.thenApplyAsync(this::cpuHeavy, customCpuPool);
+```
+
+## Errori più comuni
+
+- **Dimenticare il `.get()` o un terminatore**: senza terminatore l'eccezione finisce
+  silenziosamente in un thread di un pool. Aggancia sempre `exceptionally` / `handle`.
+- **Bloccare con `.get()` su un thread del commonPool**: rischi deadlock se tutti i
+  thread sono in `get()`.

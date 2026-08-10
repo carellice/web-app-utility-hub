@@ -1,0 +1,70 @@
+# Varargs: under the hood
+
+## What the compiler actually does
+
+For the signature `void log(String msg, Object... args)`, javac generates
+bytecode for a method `void log(String, Object[])`. At the call site, a
+variadic call like `log("x", a, b)` is translated into:
+
+```text
+anewarray Object
+dup; ldc 0; aload a; aastore
+dup; ldc 1; aload b; aastore
+invokevirtual log:(LString;[LObject;)V
+```
+
+That is: **allocation of a new array on every call**. On hot paths this is
+why methods like `Logger.log(Level, String, Object[])` have many "manual"
+overloads with 1, 2, 3 arguments.
+
+## Heap pollution with generics
+
+`T...` is erased to `Object[]`. This makes it possible to sneak the wrong
+type:
+
+```java
+@SafeVarargs
+static <T> T first(T... xs) { return xs[0]; }
+
+static List<String>[] danger() {
+    return (List<String>[]) new List[]{ List.of("a") };  // unchecked
+}
+```
+
+That is why `@SafeVarargs` only exists on methods the caller cannot override
+with a less safe implementation (`static`, `final` or `private`, and now also
+`private` default methods).
+
+## Reflection: `Method.invoke(obj, Object...)`
+
+`Method.invoke` takes `Object... args`. If your target method accepts
+`Object[]`, you must be careful:
+
+```java
+Method m = Foo.class.getMethod("bar", Object[].class);
+m.invoke(foo, new Object[]{ new Object[]{1, 2} });    // an array CONTAINING an array
+// or
+m.invoke(foo, (Object) new Object[]{1, 2});           // explicit cast to Object
+```
+
+Typical mistake: passing `m.invoke(foo, new Object[]{1, 2})` → varargs gets
+"unrolled" and Java thinks they are two arguments, not a single array.
+
+## Difference from C-style macro-assembled methods
+
+Unlike C (`...` + `va_list`), Java is **strongly typed on varargs**: you
+always know the runtime type of elements (modulo generics erasure). There's
+no stack-level trick.
+
+## Performance tip
+
+For hot "log" or "format" methods, the modern pattern is:
+
+```java
+if (logger.isDebugEnabled()) {
+    logger.debug("user={} cart={}", userId, cart);  // Slf4j: lazy, no alloc
+}
+```
+
+Or use `Supplier<String>` to defer concatenation: e.g.
+`logger.atDebug().log(() -> "...")`.

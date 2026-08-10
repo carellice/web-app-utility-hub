@@ -1,0 +1,119 @@
+# CompletableFuture — Composizione e pattern
+
+## Sync vs async: thenApply vs thenApplyAsync
+
+```java
+cf.thenApply(this::transform);         // esegue sullo STESSO thread che completa cf
+cf.thenApplyAsync(this::transform);    // submit su ForkJoinPool.commonPool()
+cf.thenApplyAsync(this::transform, customExecutor); // su pool dedicato
+```
+
+Regola: se la trasformazione è "leggera", lascia `thenApply`. Se è "pesante" o
+bloccante, usa `thenApplyAsync` con un executor dedicato per non occupare il thread
+che ha completato (di solito un thread I/O).
+
+## allOf e anyOf
+
+Aspetta tutti / il primo:
+
+```java
+CompletableFuture<Void> all = CompletableFuture.allOf(f1, f2, f3);
+all.thenRun(() -> System.out.println("tutti fatti"));
+
+// per estrarre i valori dopo allOf:
+List<String> results = Stream.of(f1, f2, f3)
+    .map(CompletableFuture::join)   // sicuro perché allOf ci ha aspettato
+    .toList();
+```
+
+```java
+CompletableFuture<Object> first = CompletableFuture.anyOf(slow, fast);
+first.thenAccept(System.out::println);  // stampa il valore del più veloce
+```
+
+## Timeout (Java 9+)
+
+```java
+cf.orTimeout(2, TimeUnit.SECONDS)
+  .exceptionally(ex -> {
+      if (ex.getCause() instanceof TimeoutException) return "default";
+      throw new RuntimeException(ex);
+  });
+
+// oppure: completa con default se scaduto
+cf.completeOnTimeout("default", 2, TimeUnit.SECONDS);
+```
+
+Pre-Java 9: `CompletableFuture.supplyAsync(...).get(2, TimeUnit.SECONDS)` (bloccante)
+o un workaround con un `ScheduledExecutorService`.
+
+## Cancellazione
+
+```java
+boolean canceled = cf.cancel(true);
+```
+
+⚠️ Non interrompe davvero il task in esecuzione: completa la `CompletableFuture`
+eccezionalmente con `CancellationException`. Per cancellazione "reale", il task deve
+controllare cooperativamente `Thread.interrupted()`.
+
+## Chain di richieste HTTP
+
+```java
+HttpClient http = HttpClient.newHttpClient();
+
+CompletableFuture<String> profile = http
+    .sendAsync(authRequest, BodyHandlers.ofString())
+    .thenApply(HttpResponse::body)
+    .thenCompose(token -> {
+        var req = HttpRequest.newBuilder()
+            .uri(URI.create("/me"))
+            .header("Authorization", "Bearer " + token)
+            .build();
+        return http.sendAsync(req, BodyHandlers.ofString());
+    })
+    .thenApply(HttpResponse::body);
+```
+
+## Backoff retry con CompletableFuture
+
+```java
+public static <T> CompletableFuture<T> retry(
+        Supplier<CompletableFuture<T>> task, int attempts, Duration backoff) {
+
+    CompletableFuture<T> result = new CompletableFuture<>();
+
+    Runnable run = new Runnable() {
+        int left = attempts;
+        @Override public void run() {
+            task.get().whenComplete((v, ex) -> {
+                if (ex == null) result.complete(v);
+                else if (--left <= 0) result.completeExceptionally(ex);
+                else CompletableFuture.delayedExecutor(
+                        backoff.toMillis(), TimeUnit.MILLISECONDS).execute(this);
+            });
+        }
+    };
+    run.run();
+    return result;
+}
+```
+
+## Pattern: pipeline parallela con risultato aggregato
+
+```java
+List<CompletableFuture<Item>> futures = ids.stream()
+    .map(id -> CompletableFuture.supplyAsync(() -> fetch(id), executor))
+    .toList();
+
+CompletableFuture<List<Item>> all = CompletableFuture
+    .allOf(futures.toArray(CompletableFuture[]::new))
+    .thenApply(v -> futures.stream().map(CompletableFuture::join).toList());
+```
+
+## Trappole comuni
+
+- **`.get()` in un thread del commonPool** → potenziale deadlock se la pipeline si attende a vicenda.
+- **Eccezione "ingoiata"**: senza `exceptionally`/`handle` né terminator, l'errore si perde nel log delle thread del pool.
+- **Wrapping in `RuntimeException`**: ogni eccezione viene avvolta in `CompletionException`. Estrai la causa con `ex.getCause()`.
+- **Pool sbagliato**: i task bloccanti devono andare su un executor dedicato, non sul commonPool.

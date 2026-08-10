@@ -1,0 +1,85 @@
+# Microservizi — Chicche e pattern avanzati
+
+## Saga pattern
+
+Transazione di business distribuita = catena di transazioni locali + compensazioni.
+
+### Coreografia (events)
+
+Ogni servizio reagisce a eventi e ne emette altri. Non c'è coordinatore. Semplice da
+implementare, difficile da capire al crescere dei servizi.
+
+```text
+OrderCreated → Payments
+PaymentDone  → Inventory
+StockReserved → Shipping
+ShippingFail → emette OrderRefundRequested → Payments rimborsa
+```
+
+### Orchestrazione
+
+Un orchestrator (Temporal, Camunda, Step Functions, Spring State Machine) detta i
+passi. Più visibile e debuggabile, ma è un single point di logica.
+
+## Outbox + CDC
+
+Per pubblicare eventi **affidabilmente** dopo un commit DB:
+
+1. Stessa transazione: scrivi in tabella `outbox`.
+2. Debezium legge il WAL del DB e pubblica gli eventi su Kafka.
+3. Marker di "sent" non serve (la garanzia è del log replication).
+
+Risolve "dual write" (DB + broker non sono atomici tra loro).
+
+## Idempotency e exactly-once illusion
+
+In distribuito non esiste "exactly-once" reale: ti dai *at-least-once delivery* + *idempotent
+consumer*. Idempotency key, dedup table, version/sequence numbers.
+
+```sql
+INSERT INTO processed_events(event_id) VALUES (?)
+ON CONFLICT DO NOTHING RETURNING 1;
+-- se RETURNING vuoto, già processato
+```
+
+## Distributed tracing — propagation
+
+Standard: **W3C Trace Context** (`traceparent` header). OpenTelemetry SDK lo propaga in
+automatico per HTTP/gRPC. Per Kafka, propagi nei headers del record.
+
+> 💡 Errore tipico: dimenticare di propagare il traceId nei thread asincroni (executor,
+> CompletableFuture). Il contesto si perde, la trace si spezza. Usa `ContextPropagators`.
+
+## Service mesh
+
+Istio, Linkerd: spostano dalla libreria al **sidecar** (Envoy) cose come:
+
+- mTLS automatico.
+- Retry / timeout / circuit breaking.
+- Traffic shifting (canary, blue/green).
+- Telemetry uniforme.
+
+Pro: meno codice nei servizi. Contro: nuovo strato da operare, latenza extra (~ms).
+
+## Multi-region e split brain
+
+Sotto network partition tra regioni, devi scegliere: chi vede l'ultima verità? Pattern:
+
+- **Single writer per chiave** (es. shard per `tenant_id`).
+- **Active-passive** con failover automatico (Patroni, Stolon per Postgres).
+- **Active-active CRDT-based** per dati semplici (counters, sets).
+
+## Deployment patterns
+
+- **Blue/green**: due ambienti identici, traffic switch atomico.
+- **Canary**: 1% → 5% → 25% → 100% del traffico al nuovo deploy.
+- **Shadow / dark launch**: invia il traffico in parallelo, ignora la risposta, misura.
+- **Feature flag** (LaunchDarkly, Unleash): disaccoppia deploy da release.
+
+## Anti-pattern
+
+- **Shared library godzilla**: tutti i microservizi importano la stessa libreria
+  monolitica → aggiornarla è come deployare il monolite.
+- **Sync chain di 5+ servizi**: ogni chiamata aggiunge latenza e probabilità di
+  fallimento. Considera async / event-driven.
+- **DB condiviso "perché è veloce"**: rompe l'indipendenza di deploy e modello.

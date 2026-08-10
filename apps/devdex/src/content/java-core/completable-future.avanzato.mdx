@@ -1,0 +1,144 @@
+# CompletableFuture — Avanzato
+
+## Modello a "completion stages"
+
+`CompletableFuture<T>` implementa `CompletionStage<T>`. Ogni operatore (`thenX`,
+`exceptionally`, `whenComplete`…) registra un nodo nella *catena*. Quando il
+`CompletableFuture` sorgente completa, la JVM percorre i nodi e li esegue secondo il
+contratto (sincrono / asincrono / executor dedicato).
+
+Internamente, c'è una **stack lock-free** di "Completion" nodes (vedi
+`java.util.concurrent.CompletableFuture$Completion`). L'ordine di esecuzione **non è
+garantito** tra rami paralleli; lo è all'interno di una catena lineare.
+
+## CompletionException unwrapping
+
+Quando un callback lancia un'eccezione, viene avvolta in `CompletionException`:
+
+```java
+cf.thenApply(v -> { throw new IOException("oops"); })
+  .exceptionally(ex -> {
+      // ex è CompletionException
+      Throwable root = ex instanceof CompletionException ? ex.getCause() : ex;
+      log.error("real cause", root);
+      return null;
+  });
+```
+
+> 💡 Helper: `Throwable t = Throwables.getRootCause(ex);` (Guava) o pattern personalizzato.
+
+## Thread context propagation
+
+In sistemi enterprise con MDC (SLF4J), Spring SecurityContext, Reactor Context,
+OpenTelemetry, **il contesto si perde** quando si passa a un altro thread del pool.
+
+Soluzioni:
+
+1. **Wrap dell'Executor**: crea un executor che cattura il contesto del thread chiamante e lo ripristina nel task.
+2. **OpenTelemetry**: `Context.taskWrapping(executor)`.
+3. **MDC**: `MDC.getCopyOfContextMap()` + `MDC.setContextMap` nei callback.
+
+```java
+public static <T> Function<T, T> withMDC(Map<String, String> ctx) {
+    return v -> {
+        Map<String, String> previous = MDC.getCopyOfContextMap();
+        MDC.setContextMap(ctx);
+        try { return v; }
+        finally {
+            if (previous == null) MDC.clear();
+            else MDC.setContextMap(previous);
+        }
+    };
+}
+```
+
+## CompletionStage in libreria pubblica
+
+Quando esponi un metodo pubblico, restituisci `CompletionStage<T>` non
+`CompletableFuture<T>`: l'interfaccia è abbastanza, e non permette al chiamante di
+completare a mano la tua future (rischio).
+
+```java
+public CompletionStage<User> findUser(long id) { ... }
+```
+
+## Performance: allocazioni
+
+Ogni `thenApply` alloca un nuovo `CompletableFuture` + un `Completion` node. Pipeline
+con decine di step → garbage pressure. Per hot paths:
+
+- Fondere step quando possibile.
+- Usare `Mono` di Reactor (più ottimizzato per pipeline lunghe).
+- O passare a virtual thread + codice imperativo.
+
+## Virtual Threads (Loom) vs CompletableFuture
+
+Con virtual thread (Java 21+) il codice asincrono può tornare **sincrono**:
+
+```java
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    Future<String> token = executor.submit(() -> auth());
+    Future<User> user   = executor.submit(() -> fetchUser(token.get()));
+    System.out.println(user.get());
+}
+```
+
+Pulisce molto codice ma non rimpiazza `CompletableFuture` quando devi **comporre**
+pipeline (es. `allOf`, `anyOf`, fan-out parallelo con riduzione).
+
+## Backpressure non c'è
+
+Lo stack pull/push reactive di Reactor / RxJava ha backpressure. `CompletableFuture`
+no: se produci 1M di future, le accumuli tutte. Per scenari streaming preferisci
+`Flux`/`Multi`.
+
+## Trappole sottili
+
+### `whenComplete` non trasforma le eccezioni
+
+`whenComplete((v, ex) -> ...)` riceve sia valore che eccezione, ma il valore di
+ritorno della lambda **viene ignorato**. Per trasformare, usa `handle`.
+
+### `cancel(true)` propaga **a valle**, non a monte
+
+Cancellare un nodo non interrompe la sorgente:
+
+```java
+CompletableFuture<Void> head = CompletableFuture.runAsync(longTask);
+CompletableFuture<Void> tail = head.thenRun(otherTask);
+
+tail.cancel(true);   // head sta ancora girando
+```
+
+### `allOf` non short-circuita su errore
+
+Se uno dei child fallisce, `allOf` segnala l'errore *solo dopo* che tutti gli altri
+sono completati. Per un fast-fail vero, costruisci con `anyOf` su un detector di
+errore + il join principale.
+
+```java
+public static <T> CompletableFuture<List<T>> allOrFail(List<CompletableFuture<T>> fs) {
+    CompletableFuture<Void> failure = new CompletableFuture<>();
+    for (var f : fs) f.exceptionally(ex -> { failure.completeExceptionally(ex); return null; });
+    return (CompletableFuture<List<T>>) (CompletableFuture<?>)
+        CompletableFuture.anyOf(
+            CompletableFuture.allOf(fs.toArray(CompletableFuture[]::new)),
+            failure
+        ).thenApply(v -> fs.stream().map(CompletableFuture::join).toList());
+}
+```
+
+## Debugging: `defaultExecutor()` e tracing
+
+Da Java 9 puoi sovrascrivere `defaultExecutor()` in una sottoclasse di
+`CompletableFuture` per loggare submit/complete con traceId. Utile in test e
+diagnostica produzione.
+
+## Domande tipiche al colloquio
+
+- *"Differenze tra `thenApply` e `thenCompose`?"* — map vs flatMap.
+- *"Cosa succede se non agganci `exceptionally` a una pipeline?"* — eccezione log silente.
+- *"`cancel(true)` interrompe il task?"* — no, marca solo la future.
+- *"`allOf` aspetta i fallimenti?"* — sì, completa solo a tutti.
+- *"Pattern di propagation di MDC / SecurityContext?"* — wrap dell'Executor.
+- *"Cosa cambia con virtual threads?"* — meno bisogno di CompletableFuture per IO, ma resta utile per fan-out parallelo.

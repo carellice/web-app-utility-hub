@@ -1,0 +1,81 @@
+# Spring Cloud — What it is and what it does
+
+**Spring Cloud** is a family of libraries on top of Spring Boot to implement
+distributed-system patterns: service discovery, external config, gateway,
+circuit breaker, tracing.
+
+> ⚠️ Spring Cloud is not a single product: it is an umbrella of independent
+> subprojects that evolve in a coordinated way (release train).
+
+## Main components
+
+| Component | Purpose |
+|---|---|
+| **Spring Cloud Config** | Centralized configuration (Git/Vault) |
+| **Spring Cloud Netflix** (being deprecated) | Eureka, Hystrix, Ribbon, Zuul |
+| **Spring Cloud Gateway** | Reactive API gateway |
+| **Spring Cloud OpenFeign** | Declarative HTTP client |
+| **Spring Cloud Sleuth/OpenTelemetry** | Distributed tracing |
+| **Spring Cloud Stream** | Abstraction over brokers (Kafka, RabbitMQ) |
+| **Spring Cloud Function** | Serverless functions |
+| **Spring Cloud Kubernetes** | Discovery and config from K8s resources |
+
+## Example: Feign client
+
+```java
+@FeignClient(name = "users", url = "http://user-service:8080")
+public interface UserClient {
+    @GetMapping("/users/{id}")
+    User get(@PathVariable long id);
+}
+
+@Service
+public class OrderService {
+    private final UserClient users;
+    public OrderService(UserClient users) { this.users = users; }
+    public Order place(long uid, ...) {
+        User u = users.get(uid);
+        ...
+    }
+}
+```
+
+`@FeignClient` generates the implementation, performs HTTP, and applies
+retry/circuit-breaker if configured.
+
+## Example: Config Server
+
+The server exposes configurations from a Git repository:
+
+```yaml
+# config-server application.yml
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/org/configs
+```
+
+The client reads them at startup:
+
+```yaml
+# user-service bootstrap.yml
+spring:
+  application:
+    name: user-service
+  config:
+    import: optional:configserver:http://config:8888
+```
+
+Properties from `user-service.yml` in the Git repo merge with the local ones.
+
+## When do you really need it?
+
+- Dozens of services → discovery and centralized config become necessary.
+- Observability tooling not handled by the service mesh.
+- Resilience patterns not handled by gateway/sidecar.
+
+On Kubernetes, many Spring Cloud features are **already provided by the
+platform**: discovery (Service), config (ConfigMap), tracing (Envoy sidecar).
+Evaluate what you truly need.

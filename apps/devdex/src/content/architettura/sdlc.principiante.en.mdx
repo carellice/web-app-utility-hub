@@ -1,0 +1,81 @@
+# SDLC — Software Development Life Cycle
+
+The **SDLC** is the set of phases for building software, from problem
+definition to retirement.
+
+## The classic phases
+
+1. **Requirements**: what is needed, who the stakeholders are, what to measure.
+2. **Design**: architecture, components, interfaces, security.
+3. **Implementation**: code + tests.
+4. **Testing**: unit, integration, system, UAT.
+5. **Deployment**: release into production.
+6. **Maintenance**: bug fixes, improvements, monitoring.
+7. **Retirement**: end-of-life of the system.
+
+## Process models
+
+### Waterfall
+
+Strict sequence: each phase ends before the next starts. Formal documents.
+
+Pros: clarity, contracts, regulated environments (public admin, banking).
+Cons: no feedback until the end, huge costs if requirements change.
+
+### Agile / Scrum
+
+Short iterations (**sprints** of 1-4 weeks), backlog, retrospectives.
+
+```
+[Backlog] → [Sprint Planning] → [Daily] → [Review] → [Retro] → start over
+```
+
+Pros: fast feedback, adapts to change, value delivered often.
+Cons: hard for projects with strict legal constraints, can degenerate into
+"agile theater".
+
+### DevOps
+
+A culture + practices to shrink the gap between dev and ops. Pillars:
+
+- **CI** (Continuous Integration): frequent merges, automated tests.
+- **CD** (Continuous Delivery/Deployment): automated releases all the way to
+  production.
+- **IaC** (Infrastructure as Code): Terraform, Ansible.
+- **Observability**: logs, metrics, traces to understand systems in prod.
+
+## Key questions at project start
+
+- Who is the end user?
+- What are the **non-functional requirements** (performance, scalability,
+  availability, security)?
+- What are the technology, time, budget constraints?
+- How do I measure success?
+
+## Example: CI/CD pipeline
+
+```yaml
+# .github/workflows/ci.yml
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { java-version: '21' }
+      - run: ./mvnw -B verify
+      - run: ./mvnw deploy
+```
+
+On every push, a pipeline runs that:
+
+1. Checks out the code.
+2. Builds + tests.
+3. Builds the container.
+4. Deploys to staging.
+5. Runs end-to-end tests.
+6. Deploys to production (manual approval or automatic).

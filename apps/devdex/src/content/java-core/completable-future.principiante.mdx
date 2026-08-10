@@ -1,0 +1,82 @@
+# CompletableFuture — Le basi
+
+Un `CompletableFuture<T>` rappresenta un calcolo asincrono che **completerà** in
+futuro con un valore di tipo `T` o con un'eccezione. Introdotta in Java 8, sostituisce
+`Future` per scenari composti.
+
+```java
+CompletableFuture<String> cf = CompletableFuture.supplyAsync(() -> {
+    Thread.sleep(500);
+    return "hello";
+});
+
+cf.thenAccept(s -> System.out.println(s));   // stampa "hello" quando pronto
+```
+
+## I 3 modi di creare un CompletableFuture
+
+```java
+// 1) Asincrono con valore
+CompletableFuture<String> a = CompletableFuture.supplyAsync(() -> fetch());
+
+// 2) Già completato (utile in test)
+CompletableFuture<Integer> b = CompletableFuture.completedFuture(42);
+
+// 3) Da completare manualmente
+CompletableFuture<String> c = new CompletableFuture<>();
+// più tardi:
+c.complete("ok");
+// oppure
+c.completeExceptionally(new IOException("boom"));
+```
+
+## Ottenere il risultato
+
+```java
+String result = cf.get();                          // bloccante, può lanciare InterruptedException
+String result = cf.getNow("default");              // non bloccante: default se non pronto
+String result = cf.get(2, TimeUnit.SECONDS);       // con timeout
+String result = cf.join();                         // bloccante, eccezioni unchecked
+```
+
+> 💡 In codice asincrono **non** usare `.get()`: blocchi il thread. Usa `thenApply` /
+> `thenAccept` per reagire al completamento.
+
+## Operatori essenziali
+
+```java
+cf.thenApply(s -> s.toUpperCase());         // T -> R
+cf.thenAccept(s -> log.info(s));            // T -> void
+cf.thenRun(() -> log.info("done"));         // niente input, niente output
+cf.thenCompose(s -> fetchMore(s));          // T -> CompletableFuture<R>  (flatMap)
+cf.thenCombine(other, (a, b) -> a + b);     // combina due future
+```
+
+## Errori
+
+```java
+cf.exceptionally(ex -> "fallback");          // T quando va bene, recovery quando no
+cf.handle((value, ex) -> ex != null ? "ko" : value);
+```
+
+## Esempio pratico
+
+```java
+CompletableFuture<User> user = api.getUserAsync(id);
+CompletableFuture<Cart> cart = api.getCartAsync(id);
+
+user.thenCombine(cart, (u, c) -> new Checkout(u, c))
+    .thenAccept(this::send)
+    .exceptionally(ex -> { log.error(ex); return null; });
+```
+
+## Differenza con `Future`
+
+| | `Future<T>` | `CompletableFuture<T>` |
+|---|---|---|
+| Callback / catene | ❌ solo `get()` | ✅ `thenApply`, `thenCompose`, … |
+| Completamento manuale | ❌ | ✅ `complete()` |
+| Combinatori | ❌ | ✅ `allOf`, `anyOf` |
+| API | ridotta | molto ricca |
+
+Per nuovo codice asincrono, usa sempre `CompletableFuture`.

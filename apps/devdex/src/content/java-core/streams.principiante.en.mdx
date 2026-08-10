@@ -1,0 +1,43 @@
+# Stream API — The basics
+
+A `Stream<T>` is a **pipeline of operations** on a data source (collection,
+array, generator…). It is not a data structure: it stores nothing and does
+not modify the source.
+
+```java
+List<String> names = List.of("Anna", "Bea", "Carlo", "Dario");
+
+long count = names.stream()
+                  .filter(n -> n.length() > 3)
+                  .map(String::toUpperCase)
+                  .count();
+
+System.out.println(count);   // 3 -> ANNA, CARLO, DARIO
+```
+
+## Three phases
+
+1. **Source**: `collection.stream()`, `Stream.of(...)`, `Files.lines(path)`,
+   …
+2. **Intermediate operations** (lazy, return a Stream): `filter`, `map`,
+   `flatMap`, `sorted`, `distinct`, `limit`, `peek`, …
+3. **Terminal operation** (eager, "fires up" the pipeline): `count`,
+   `collect`, `forEach`, `reduce`, `findFirst`, `toList()`, …
+
+> 💡 Without a terminal operation, nothing executes.
+
+## Collect into a list
+
+```java
+List<String> upper = names.stream()
+                          .map(String::toUpperCase)
+                          .toList();  // since Java 16+
+```
+
+## Common mistakes
+
+- **Reusing a stream**: after the terminal op it is "consumed", you can't
+  reuse it.
+- **Modifying the source** during an intermediate operation →
+  `ConcurrentModificationException`.
+- **Side effects in `map` or `filter`**: don't do it, they should be pure.

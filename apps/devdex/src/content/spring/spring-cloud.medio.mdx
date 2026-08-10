@@ -1,0 +1,167 @@
+# Spring Cloud — Pattern e moduli
+
+## Service discovery
+
+### Eureka (Spring Cloud Netflix)
+
+```yaml
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://eureka:8761/eureka/
+```
+
+```java
+@FeignClient(name = "users")     // niente URL: risolto via Eureka
+public interface UserClient { ... }
+```
+
+`@LoadBalanced RestTemplate` o WebClient con `@LoadBalanced` ottiene la stessa
+risoluzione.
+
+### Kubernetes Service
+
+In K8s usi DNS nativo: `http://user-service.default.svc.cluster.local`. Eureka diventa
+ridondante. `spring-cloud-kubernetes-discovery` espone i Service come backend.
+
+## Config Server
+
+```yaml
+spring:
+  config:
+    import: configserver:http://config:8888
+```
+
+A startup, il client tira giù le properties dal server. Refresh delle properties a
+runtime:
+
+```java
+@RefreshScope
+@Component
+public class RateLimits {
+    @Value("${app.rate.max}") int max;
+}
+```
+
+Endpoint `/actuator/refresh` rigenera i bean `@RefreshScope`.
+
+## Spring Cloud Gateway
+
+API gateway reactive (Netty + Reactor), sostituisce Zuul.
+
+```yaml
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: orders
+          uri: lb://orders-service
+          predicates:
+            - Path=/api/orders/**
+          filters:
+            - StripPrefix=1
+            - name: CircuitBreaker
+              args:
+                name: orders-cb
+                fallbackUri: forward:/fallback/orders
+```
+
+Funzioni: routing, filter (auth, rewrite, retry, rate-limit), aggregazione, load
+balancing.
+
+## OpenFeign con resilienza
+
+```java
+@FeignClient(
+    name = "payments",
+    fallback = PaymentsFallback.class,
+    configuration = PaymentsConfig.class
+)
+public interface PaymentsClient { ... }
+
+@Component
+class PaymentsFallback implements PaymentsClient {
+    public PaymentStatus get(long id) { return PaymentStatus.unknown(); }
+}
+```
+
+In combinazione con Resilience4j (`spring-cloud-circuitbreaker-resilience4j`):
+circuit breaker, retry, timeout, bulkhead.
+
+## Distributed tracing
+
+Da Spring Boot 3.0: si usa **Micrometer Tracing** (sostituisce Sleuth).
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      endpoint: http://zipkin:9411/api/v2/spans
+```
+
+Aggiunge `traceId` e `spanId` ai log MDC, propaga gli header `traceparent` (W3C
+Trace Context) sui client HTTP/messaging.
+
+## Spring Cloud Stream
+
+Astrazione sopra Kafka/RabbitMQ con functional style:
+
+```java
+@Bean
+public Function<Order, Receipt> processOrder() {
+    return order -> {
+        var r = process(order);
+        return r;
+    };
+}
+```
+
+```yaml
+spring:
+  cloud:
+    stream:
+      bindings:
+        processOrder-in-0:
+          destination: orders
+        processOrder-out-0:
+          destination: receipts
+      kafka:
+        binder:
+          brokers: kafka:9092
+```
+
+Permette di cambiare broker senza toccare il codice (paradigma "Source/Sink/Processor").
+
+## Resilience patterns
+
+- **Retry con backoff**: con jitter, evita "thundering herd".
+- **Circuit breaker**: smette di chiamare un servizio in down.
+- **Bulkhead**: pool separati per ogni dipendenza, isola le saturazioni.
+- **Rate limiting**: token bucket per chiamante.
+
+```java
+@CircuitBreaker(name = "payments", fallbackMethod = "fallback")
+@Retry(name = "payments")
+public Payment charge(...) { ... }
+
+public Payment fallback(Throwable t, ...) { ... }
+```
+
+## Quando Service Mesh (Istio/Linkerd) li sostituisce
+
+Service mesh fornisce: mTLS, retry, circuit breaking, telemetry, traffic shifting —
+**a livello di sidecar**, senza codice nel servizio.
+
+Vantaggi:
+- Lingua-agnostico.
+- Aggiornabile senza redeploy dei servizi.
+
+Svantaggi:
+- Overhead di latency.
+- Complessità operativa (Envoy + control plane).
+
+In genere: **service mesh** per concerns di rete, **Spring Cloud** per concerns di
+business (config, function binding, declarative client).

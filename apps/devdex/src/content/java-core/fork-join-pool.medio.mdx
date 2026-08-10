@@ -1,0 +1,118 @@
+# ForkJoinPool — Strategie e API
+
+## RecursiveAction vs RecursiveTask
+
+- `RecursiveAction`: task che non restituisce nulla (`void compute()`).
+- `RecursiveTask<V>`: task che restituisce un valore (`V compute()`).
+
+## Soglia di split (THRESHOLD)
+
+La regola empirica: split fino a che ogni sotto-task **ammortizza** l'overhead.
+
+- Troppo piccola → tanti task, troppo overhead.
+- Troppo grande → poca parallelismo.
+
+Indicativamente: dimensione tale che ogni task richieda ≥ 100 μs di CPU.
+
+## fork().join() vs invokeAll
+
+```java
+left.fork();
+right.compute();   // più veloce: usa il thread corrente, niente push/pop
+left.join();
+```
+
+Equivalente più pulito:
+
+```java
+invokeAll(left, right);
+return left.join() + right.join();
+```
+
+## Pool dedicato vs commonPool
+
+Per isolare carichi e non interferire con stream paralleli o CompletableFuture:
+
+```java
+ForkJoinPool custom = new ForkJoinPool(8);
+try {
+    Long r = custom.submit(() -> Arrays.stream(arr).parallel().sum()).get();
+} finally {
+    custom.shutdown();
+}
+```
+
+> 💡 Trick: usare `submit` da un pool custom "pina" lo stream parallelo lanciato dentro
+> a quel pool — perché lo stream guarda il task corrente per scegliere il pool.
+
+## ManagedBlocker
+
+Se un task ForkJoin deve bloccarsi (lock, I/O), può **chiedere** al pool di
+compensare creando un worker temporaneo:
+
+```java
+ForkJoinPool.managedBlock(new ForkJoinPool.ManagedBlocker() {
+    boolean done = false;
+    @Override public boolean block() throws InterruptedException {
+        lock.lockInterruptibly();
+        done = true;
+        return true;
+    }
+    @Override public boolean isReleasable() { return done; }
+});
+```
+
+Senza `ManagedBlocker`, il blocking restringe il parallelismo effettivo del pool.
+
+## Configurazione del commonPool
+
+Tramite system properties (boot-time):
+
+```text
+-Djava.util.concurrent.ForkJoinPool.common.parallelism=8
+-Djava.util.concurrent.ForkJoinPool.common.threadFactory=...
+```
+
+In Spring Boot: queste proprietà vanno nei JVM args, non in `application.properties`.
+
+## Pitfall classico: stream parallel + blocking
+
+```java
+items.parallelStream()
+     .map(i -> http.get(i.url()))   // ⚠️ blocking, intasa il commonPool
+     .toList();
+```
+
+Soluzione: usare un executor dedicato, o passare a `CompletableFuture.supplyAsync(..., customPool)`.
+
+## Profiling
+
+- JFR (Java Flight Recorder): eventi `jdk.ForkJoinTask*`.
+- VisualVM, async-profiler: distribuzione del lavoro tra worker.
+
+## Esempio realistico: word count
+
+```java
+public static Map<String, Long> wordCount(List<String> texts) {
+    return ForkJoinPool.commonPool().invoke(new WC(texts, 0, texts.size()));
+}
+
+static final int TH = 50;
+static class WC extends RecursiveTask<Map<String, Long>> {
+    final List<String> data; final int lo, hi;
+    WC(List<String> data, int lo, int hi) { this.data = data; this.lo = lo; this.hi = hi; }
+    protected Map<String, Long> compute() {
+        if (hi - lo <= TH) {
+            return data.subList(lo, hi).stream()
+                .flatMap(s -> Arrays.stream(s.split("\\s+")))
+                .collect(Collectors.groupingBy(w -> w, Collectors.counting()));
+        }
+        int mid = (lo + hi) >>> 1;
+        WC l = new WC(data, lo, mid), r = new WC(data, mid, hi);
+        invokeAll(l, r);
+        Map<String, Long> out = new HashMap<>(l.join());
+        r.join().forEach((k, v) -> out.merge(k, v, Long::sum));
+        return out;
+    }
+}
+```

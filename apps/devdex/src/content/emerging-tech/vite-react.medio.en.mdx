@@ -1,0 +1,159 @@
+# Vite + React — Intermediate patterns
+
+## Routing
+
+`react-router-dom` v6:
+
+```jsx
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+
+const router = createBrowserRouter([
+  { path: '/', element: <Home /> },
+  { path: '/users/:id', element: <UserPage /> },
+]);
+
+<RouterProvider router={router} />
+```
+
+Vite serves index.html for any URL: the SPA handles routing client-side.
+
+## Build with code splitting
+
+Dynamic imports → separate lazy-loaded chunks:
+
+```jsx
+const Settings = lazy(() => import('./pages/Settings.jsx'));
+
+<Suspense fallback={<Spinner />}>
+  <Settings />
+</Suspense>
+```
+
+In the build, Rollup creates `settings-[hash].js` loaded only on access.
+
+## Manual chunking
+
+```js
+// vite.config.js
+export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          vendor: ['lodash', 'date-fns'],
+        },
+      },
+    },
+  },
+});
+```
+
+Shrinks the main chunk and improves caching: react/vendor rarely change.
+
+## CSS handling
+
+- **CSS imports**: `import './app.css'`.
+- **CSS Modules**: `import s from './Card.module.css'` → local classes.
+- **PostCSS / Tailwind**: zero config, just a `tailwind.config.js`.
+- **CSS-in-JS** (styled-components, emotion, vanilla-extract): supported via plugin.
+
+## TypeScript
+
+`npm create vite@latest myapp -- --template react-ts`. TS compiler server-side
+for types, esbuild for transformation (no type-check on every save: use
+`tsc --noEmit` in CI).
+
+## API proxy
+
+```js
+// vite.config.js
+server: {
+  proxy: {
+    '/api': {
+      target: 'http://localhost:8080',
+      changeOrigin: true,
+    }
+  }
+}
+```
+
+In dev, calls to `/api/...` are forwarded to the backend, avoiding CORS.
+
+## PWA
+
+```bash
+npm install -D vite-plugin-pwa
+```
+
+```js
+import { VitePWA } from 'vite-plugin-pwa';
+
+export default defineConfig({
+  plugins: [react(), VitePWA({ registerType: 'autoUpdate' })],
+});
+```
+
+Generates a service worker (Workbox), manifest, and provides a `registerSW()` function.
+
+## MDX
+
+```bash
+npm install @mdx-js/rollup @mdx-js/react
+```
+
+```js
+// vite.config.js
+import mdx from '@mdx-js/rollup';
+
+export default defineConfig({
+  plugins: [
+    { enforce: 'pre', ...mdx({ providerImportSource: '@mdx-js/react' }) },
+    react({ include: /\.(jsx|js|mdx)$/ }),
+  ],
+});
+```
+
+Now you can import `.mdx` files as React components.
+
+## Testing
+
+- **Vitest**: testing framework compatible with the Jest API, integrated with Vite.
+  Same transformations as the dev server → fast.
+- **React Testing Library**: best practice for testing components by behavior.
+
+```js
+// vitest.config.js
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  test: { environment: 'jsdom', globals: true, setupFiles: './src/setupTests.js' },
+});
+```
+
+## Build hashing and cache
+
+Vite produces files with a hash in the name:
+
+```
+dist/assets/index-Q7uK8mPx.js
+```
+
+You change the code → the hash changes → the browser downloads the new file.
+Unchanged files keep the same hash and stay in cache.
+
+## Bundle analyzer
+
+```bash
+npm install -D rollup-plugin-visualizer
+```
+
+```js
+import { visualizer } from 'rollup-plugin-visualizer';
+plugins: [react(), visualizer({ open: true })],
+```
+
+Generates `stats.html`: a treemap of bundle pieces. Useful to discover
+surprisingly large dependencies.

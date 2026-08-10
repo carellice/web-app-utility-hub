@@ -1,0 +1,129 @@
+# @Lazy avanzato — Internals, AOT, anti-pattern
+
+## Come è implementato il proxy `@Lazy`
+
+Quando `@Lazy` è applicato al punto di iniezione, Spring inietta non l'istanza ma un
+**proxy** generato da `ContextAnnotationAutowireCandidateResolver`:
+
+- JDK dynamic proxy se il tipo target è un'interfaccia.
+- CGLIB se è una classe concreta.
+
+Il proxy mantiene un riferimento al `BeanFactory` e risolve il target al primo metodo
+invocato. Dopo la risoluzione la stessa istanza target viene riusata (singleton scope).
+
+## Lazy + `final` field
+
+```java
+public class A {
+    private final B b;
+    public A(@Lazy B b) { this.b = b; }   // ok: il proxy è un'istanza concreta
+}
+```
+
+`final` resta valido: stiamo memorizzando il **proxy**, non l'istanza reale.
+
+## Lazy con `ObjectProvider` (alternativa più pulita)
+
+```java
+public class A {
+    private final ObjectProvider<B> bProvider;
+    public A(ObjectProvider<B> bProvider) { this.bProvider = bProvider; }
+
+    public void use() {
+        B b = bProvider.getIfAvailable();
+        if (b != null) b.do();
+    }
+}
+```
+
+Vantaggi rispetto a `@Lazy`:
+
+- Esplicito: il chiamante sa di star "richiedendo" l'istanza.
+- Niente proxy, niente sorpresa di self-invocation.
+- Si può chiedere `getIfAvailable`, `getIfUnique`, iterare con `stream()`.
+
+## Lazy + transactional
+
+Se inietti `@Lazy MyService` dove `MyService` ha `@Transactional`, **il proxy di
+@Lazy avvolge il proxy di @Transactional**, e tutto continua a funzionare. La JVM
+chiama il proxy @Lazy → questo istanzia il target (che è già un proxy
+@Transactional) → la chiamata passa per la tx come previsto.
+
+## Performance: cosa misurare
+
+Profilare con `ApplicationStartup`:
+
+```java
+app.setApplicationStartup(new FlightRecorderApplicationStartup());
+```
+
+Genera eventi JFR `spring.beans.instantiate`. Visualizzabili con JDK Mission Control.
+
+Tipici colpevoli pesanti:
+
+- `EntityManagerFactory` (Hibernate scan annotation).
+- `DataSource` con pool inizializzato eagermente.
+- Reflection scanning di `@ConfigurationProperties` su classpath grossi.
+
+## AOT, GraalVM e @Lazy
+
+In modalità AOT/native:
+
+- I bean lazy vengono comunque analizzati a build-time (closed-world).
+- Il proxy `@Lazy` necessita di `RuntimeHints` per la reflection sulla classe target.
+- Spring 6 e Spring Boot 3 generano automaticamente questi hint per i pattern standard.
+
+> ⚠️ Combinare `@Lazy` con plugin/discovery dinamica + GraalVM è territorio
+> avanzato. Conviene testare in `native:test`.
+
+## Bean ALWAYS necessari ma vuoi startup veloce
+
+Pattern: **inizializzazione asincrona** dopo startup.
+
+```java
+@Component
+public class Cache {
+    private CompletableFuture<List<Item>> data;
+
+    @PostConstruct
+    public void init() {
+        data = CompletableFuture.supplyAsync(this::loadAll);
+    }
+
+    public List<Item> snapshot() {
+        return data.getNow(List.of()); // ritorna vuoto finché non pronto
+    }
+}
+```
+
+L'app è pronta a ricevere request, e il primo chiamante o vede il dato (se già
+caricato) o un fallback.
+
+## @Lazy su `@Configuration`
+
+```java
+@Configuration @Lazy
+public class HeavyCfg {
+    @Bean public ExpensiveBean bean() { return new ExpensiveBean(); }
+}
+```
+
+Tutti i `@Bean` dentro diventano lazy. Equivalente a `@Lazy` su ogni metodo.
+
+## Trappole
+
+- **`@Component @Lazy`** ma poi iniettato come `@Autowired` esplicito eager: il bean
+  viene istanziato lo stesso, perché il punto di iniezione lo ha richiesto.
+- **`@Lazy` su `@Configuration`** ma con `proxyBeanMethods = true`: il proxy CGLIB
+  viene comunque creato eager — la lazy si applica ai bean *prodotti*, non alla
+  configuration class.
+- **Lazy + `BeanPostProcessor`**: i PostProcessor sono sempre eager; metterli `@Lazy`
+  non ha effetto.
+
+## Domande tipiche al colloquio
+
+- *"Cosa succede tecnicamente quando inietto `@Lazy MyBean`?"* — proxy + risoluzione al primo metodo.
+- *"Differenze tra `@Lazy` e `ObjectProvider`?"*
+- *"`spring.main.lazy-initialization=true` in prod, conviene?"*
+- *"Come spezzare un ciclo di dipendenze in Spring 2.6+?"*
+- *"Come misurare l'impatto di `@Lazy` sullo startup?"*

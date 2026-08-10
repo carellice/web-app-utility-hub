@@ -1,0 +1,166 @@
+# GraphQL — Avanzato
+
+## Cost analysis e query complessity
+
+GraphQL espone più potere al client → rischio di query **catastrofiche**:
+
+```graphql
+{
+  users {
+    posts { comments { author { posts { comments { ... } } } } }
+  }
+}
+```
+
+Mitigazioni:
+
+- **Max depth**: rifiuta query con depth > N.
+- **Query complexity score**: ogni campo costa X, somma totale > soglia → rifiuto.
+- **Pagination obbligatoria** sui campi collection.
+
+```java
+@Bean
+public GraphQlSourceBuilderCustomizer instrument() {
+    return b -> b.configureRuntimeWiring(rw ->
+        rw.codeRegistry(codeRegistry -> codeRegistry.fieldVisibility(...)));
+}
+```
+
+Plugin di terze parti come `graphql-java-extended-validation` per complexity scoring.
+
+## Query whitelisting
+
+In produzione, accettare solo query pre-approvate (persisted queries). Effetti:
+
+- Sicurezza: niente DoS via query maliziose.
+- Performance: pre-cache piani esecuzione.
+- Versioning implicito: il client invia hash, il server può evolvere lo schema senza
+  rompere client esistenti.
+
+## Schema evolution
+
+Niente versioning come REST (`/v1/`, `/v2/`). Si evolve in **modo additivo**:
+
+- Aggiungi campi: non rompe.
+- Marca campi `@deprecated(reason: "use X")`: comunichi senza rompere.
+- Rimuovi solo dopo che nessuno li usa (telemetria).
+
+Strumenti: GraphQL Inspector confronta schema, segnala breaking changes.
+
+## DataLoader: thread/coroutine safety
+
+DataLoader è per-request (per "execution context"). Condividerlo tra request porta a
+cache leak e mix dati tra utenti. In Spring for GraphQL il `DataLoaderRegistry` viene
+creato fresh per ogni richiesta GraphQL.
+
+## Query execution model
+
+```text
+Parse → Validate → Plan → Execute (resolver tree)
+```
+
+L'execution è **parallel-friendly**: rami indipendenti possono essere risolti in
+parallelo. Spring for GraphQL usa Reactor → ogni resolver può tornare `Mono`/`Flux`
+e il framework parallelizza.
+
+```java
+@SchemaMapping
+public Mono<List<Order>> orders(User u) {
+    return Mono.fromCallable(() -> repo.findByUser(u.id()))
+               .subscribeOn(Schedulers.boundedElastic());
+}
+```
+
+## Cursor pagination: stabile, scalabile
+
+```sql
+SELECT * FROM orders
+WHERE (created_at, id) < ($cursor_ts, $cursor_id)
+ORDER BY created_at DESC, id DESC
+LIMIT 50;
+```
+
+Tie-breaker su `id` per stabilità. Cursore opaco base64 di `(ts, id)`.
+
+## Field-level error vs top-level error
+
+```graphql
+type Order {
+  id: ID!
+  customer: Customer    # nullable: failure parziale
+}
+```
+
+Se il `customer` resolver fallisce, `customer = null`, ordine ancora restituito.
+Se invece il campo è non-null (`Customer!`), la failure si "propaga" al genitore.
+
+Design tip: usa null permission strategica per scenari "best-effort"; non-null per
+invarianti di dominio.
+
+## Streaming con `@stream` / `@defer` (incubating)
+
+```graphql
+{
+  posts @stream(initialCount: 3) { title }
+}
+```
+
+Il server invia 3 risultati subito, poi i successivi via push. Multipart response o
+SSE. Standard in evoluzione (GraphQL over SSE).
+
+## Federation: subgraph & supergraph
+
+Subgraph A:
+
+```graphql
+type User @key(fields: "id") {
+  id: ID!
+  name: String!
+}
+```
+
+Subgraph B estende:
+
+```graphql
+extend type User @key(fields: "id") {
+  id: ID! @external
+  orders: [Order!]!
+}
+```
+
+Il **gateway** unisce: una query `{ user(id: "1") { name orders { id } } }` viene
+splittata, eseguita in parallelo sui due subgraph, ricomposta. Pattern dominante in
+realtà con tanti team.
+
+## Performance pitfalls
+
+- **Resolver sequenziali sincroni** in WebMvc: usa virtual thread o reactive.
+- **DataLoader configurato male**: batch troppo grossi → "all-or-nothing" failure.
+- **Field con side effect**: GraphQL aspetta che siano *pure*. Side effect = mutation.
+- **Schema giant**: introspection lenta, IDE allerta. Splitta in subgraph.
+
+## Observability
+
+OpenTelemetry GenAI semconv per GraphQL: ogni operation è uno span con
+- operation name (anche con persisted queries hash).
+- complexity score.
+- depth.
+- errors count.
+
+In Apollo Studio o Datadog: vedi *per campo* il p95, error rate, top consumer.
+
+## Sicurezza extra
+
+- **Disable introspection** in prod (almeno mascherato).
+- **Rate limit per IP/utente** sul `/graphql`.
+- **CSRF protection** per mutation se usi cookie auth.
+- **Schema sanitization**: niente PII nelle query log (Apollo Server lo fa).
+
+## Domande tipiche al colloquio
+
+- *"Perché GraphQL risolve over-fetching?"*
+- *"Cos'è il problema N+1 in GraphQL? Come si risolve?"* — DataLoader.
+- *"Pagination Relay: a cosa servono `edges` e `cursor`?"*
+- *"Come gestisci schema evolution senza rompere i client?"*
+- *"Persisted queries: vantaggi?"*
+- *"Quando preferiresti REST a GraphQL?"*

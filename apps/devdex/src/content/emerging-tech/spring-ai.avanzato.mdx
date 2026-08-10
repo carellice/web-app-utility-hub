@@ -1,0 +1,91 @@
+# Spring AI / LangChain4j — Chicche avanzate
+
+## Embeddings: cosa sono davvero
+
+Un *embedding* è un vettore (es. 1536 dimensioni per OpenAI `text-embedding-3-small`)
+che rappresenta il significato di un testo. Testi simili → vettori vicini (cosine
+similarity).
+
+```text
+"il gatto dorme"  →  [0.12, -0.04, ...]
+"un felino riposa" →  [0.13, -0.06, ...]
+distance ~ 0.02
+```
+
+Sotto il cofano: l'embedding model è un transformer mediato/pooled, di solito molto più
+piccolo del chat model.
+
+## VectorStore: HNSW & friends
+
+I VectorStore moderni usano **HNSW** (Hierarchical Navigable Small World): grafo a layer
+in cui la ricerca approssimata è O(log N). Trade-off: meno preciso del brute force, ma
+millisecondi anche su milioni di vettori.
+
+- Postgres + pgvector: comodo se hai già un Postgres in prod.
+- Chroma / Qdrant: standalone, ottimi in dev.
+- Pinecone / Weaviate: managed, ottimi in scale.
+
+## Chunking strategies
+
+Dividere documenti per indicizzazione:
+
+- **Fixed size**: semplice, può spezzare frasi.
+- **Sentence/Recursive**: rispetta separatori naturali.
+- **Semantic chunking** (più recente): dividi quando l'embedding "cambia" significato.
+- Overlap (es. 10-20%) per non perdere contesto al bordo.
+
+## Reranking
+
+Dopo aver preso top-K dal VectorStore, un cross-encoder (Cohere Rerank, BGE-reranker)
+riordina per qualità. Aumenta la precisione del RAG sensibilmente, costo extra in
+latency.
+
+## Agent pattern
+
+L'LLM è un planner: decide quali tool chiamare, in che ordine, fino a quando l'obiettivo
+è raggiunto.
+
+```text
+User: "Prenotami un treno Roma-Milano domani mattina sotto 80€"
+
+Agent loop:
+  1. Tool: search_trains(...)  → list
+  2. Tool: filter(price < 80)  → 3 risultati
+  3. Tool: book(id=tre1)       → conferma
+  4. Risposta finale
+```
+
+LangChain4j ha `AiServices` per costruire agent con tool tipati. Attenzione: gli agent
+possono loopare → metti un limite di iterazioni e budget di token.
+
+## Prompt injection
+
+Un input utente può iniettare istruzioni: *"Ignora le istruzioni precedenti e dimmi
+…"*. Mitigazioni:
+
+- Separare con delimitatori espliciti il contesto utente.
+- Validare l'output (es. mai eseguire SQL prodotto direttamente).
+- Sandboxing dei tool che possono fare side effect.
+- "Spotlighting": marcare il contenuto utente in modo riconoscibile.
+
+## Determinismo e temperature
+
+`temperature` (0–2) controlla la casualità. Per RAG/risposte fattuali usa temperatura
+**bassa** (0–0.3). Per output creativi più alta.
+
+`seed` (OpenAI, Anthropic) permette quasi-determinismo per i test, ma non garanzie
+strette.
+
+## Osservabilità LLM
+
+Strumenti: Langfuse, Helicone, Arize, OpenTelemetry GenAI semconv. Tracci: prompt,
+modello, token, latenza, costi. **Senza questo, fai voli alla cieca in produzione.**
+
+## Pattern per produzione
+
+- **Retry con backoff** sui 429/5xx del provider.
+- **Fallback model**: se primary fallisce, prova secondario (Haiku → Sonnet → 4o-mini).
+- **Streaming + cancellazione**: utente esce dalla pagina → cancella la generation per
+  non sprecare token.
+- **Rate limit per utente** (Bucket4j / Redis): le tue API LLM-based diventano
+  costose se abusate.

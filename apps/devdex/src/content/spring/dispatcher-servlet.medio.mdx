@@ -1,0 +1,160 @@
+# DispatcherServlet — Pipeline e configurazione
+
+## Pipeline completa
+
+```
+Client
+  ↓
+[Servlet container filters]              (security, gzip, CORS)
+  ↓
+[DispatcherServlet]
+  ↓
+[HandlerMapping]                          (URL → handler)
+  ↓
+[HandlerInterceptors.preHandle]
+  ↓
+[HandlerAdapter]                          (chiama il metodo)
+  │
+  ├─ Argument resolvers                   (@RequestBody, @PathVariable, etc.)
+  ├─ Controller method
+  ├─ Return value handlers                (@ResponseBody → JSON, ModelAndView → view)
+  │
+[HandlerInterceptors.postHandle]
+  ↓
+[HandlerExceptionResolver]                (se è stata sollevata un'eccezione)
+  ↓
+[View resolution] (se non REST)
+  ↓
+[HandlerInterceptors.afterCompletion]
+  ↓
+Response
+```
+
+## HandlerMapping
+
+Spring MVC ha più HandlerMapping. I principali:
+
+- `RequestMappingHandlerMapping`: matcha `@RequestMapping`/`@GetMapping`/ecc.
+- `SimpleUrlHandlerMapping`: legacy per static resources.
+- `WelcomePageHandlerMapping`: redirect a `index.html`.
+
+Sono ordinati: Spring chiede a uno alla volta finché trova un match.
+
+## HandlerAdapter
+
+Per ogni tipo di handler c'è un adapter:
+
+- `RequestMappingHandlerAdapter` — metodi annotati.
+- `HttpRequestHandlerAdapter` — static resources.
+- `SimpleControllerHandlerAdapter` — legacy `Controller` interface.
+
+## Argument resolver e return value handler
+
+```java
+public Order create(
+    @PathVariable long id,                 // PathVariableMapMethodArgumentResolver
+    @RequestParam String tag,              // RequestParamMethodArgumentResolver
+    @RequestBody @Valid NewOrder cmd,      // RequestResponseBodyMethodProcessor
+    HttpServletRequest req                 // ServletRequestMethodArgumentResolver
+) { ... }
+```
+
+Puoi registrare i tuoi:
+
+```java
+@Configuration
+public class Cfg implements WebMvcConfigurer {
+    @Override
+    public void addArgumentResolvers(List<HandlerMethodArgumentResolver> r) {
+        r.add(new TenantContextResolver());
+    }
+}
+```
+
+## HttpMessageConverter
+
+I convertitori serializzano/deserializzano body:
+
+- `MappingJackson2HttpMessageConverter` — JSON.
+- `MappingJackson2XmlHttpMessageConverter` — XML.
+- `ByteArrayHttpMessageConverter` — binari.
+- `FormHttpMessageConverter` — form-urlencoded.
+
+Configurazione (Spring Boot autoconfigura):
+
+```java
+@Bean
+public Jackson2ObjectMapperBuilderCustomizer jackson() {
+    return b -> b.featuresToDisable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                 .modules(new JavaTimeModule());
+}
+```
+
+## Gestione eccezioni
+
+```java
+@RestControllerAdvice
+public class GlobalErrors {
+    @ExceptionHandler(NotFoundException.class)
+    public ResponseEntity<ApiError> notFound(NotFoundException e) {
+        return ResponseEntity.status(404).body(new ApiError(e.getMessage()));
+    }
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiError> validation(MethodArgumentNotValidException e) {
+        return ResponseEntity.badRequest().body(ApiError.from(e));
+    }
+}
+```
+
+Spring 6+: errori standardizzati con **RFC 7807 Problem Details** via `ProblemDetail`.
+
+## CORS
+
+```java
+@CrossOrigin(origins = "https://app.example.com")
+@RestController
+public class PublicApi { ... }
+
+// globale:
+@Configuration
+public class Cors implements WebMvcConfigurer {
+    public void addCorsMappings(CorsRegistry r) {
+        r.addMapping("/**")
+         .allowedOrigins("https://app.example.com")
+         .allowedMethods("GET", "POST", "DELETE");
+    }
+}
+```
+
+## Async controllers
+
+```java
+@GetMapping("/slow")
+public DeferredResult<Order> slow() {
+    DeferredResult<Order> result = new DeferredResult<>();
+    CompletableFuture
+        .supplyAsync(() -> heavy(), executor)
+        .whenComplete((v, ex) -> {
+            if (ex != null) result.setErrorResult(ex);
+            else result.setResult(v);
+        });
+    return result;
+}
+```
+
+Il servlet thread viene rilasciato; il response writer torna in azione quando
+`DeferredResult` è completato. Alternative: `CompletableFuture<T>` come tipo di
+ritorno (Spring 4.2+) o reactive `Mono<T>` (con WebFlux).
+
+## Static resources
+
+Default: `classpath:/static/`, `classpath:/public/`, `classpath:/resources/`,
+`classpath:/META-INF/resources/`. Configurabile:
+
+```java
+public void addResourceHandlers(ResourceHandlerRegistry r) {
+    r.addResourceHandler("/assets/**")
+     .addResourceLocations("classpath:/assets/")
+     .setCachePeriod(3600);
+}
+```

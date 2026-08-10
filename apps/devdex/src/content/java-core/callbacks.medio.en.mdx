@@ -1,0 +1,110 @@
+# Callbacks: from listener to Future
+
+## Evolving callbacks into Future / CompletableFuture
+
+Adapter pattern: wrap a callback-based API in a future-based API.
+
+```java
+public CompletableFuture<File> downloadAsync(URL url) {
+    CompletableFuture<File> cf = new CompletableFuture<>();
+    download(url, new DownloadListener() {
+        public void onSuccess(File f) { cf.complete(f); }
+        public void onError(Throwable t) { cf.completeExceptionally(t); }
+    });
+    return cf;
+}
+```
+
+From here, composition becomes linear:
+
+```java
+auth(user)
+    .thenCompose(this::fetchUser)
+    .thenCompose(this::fetchCart)
+    .thenAccept(this::checkout)
+    .exceptionally(this::logError);
+```
+
+## Single-fire vs multi-fire callbacks
+
+- **Single-fire**: completes once (download, DB query). Natural mapping to
+  `CompletableFuture`.
+- **Multi-fire**: emits N values over time (WebSocket, UI events, sensors).
+  Natural mapping to:
+  - `Iterable` (pull, synchronous).
+  - `Stream` (Java 8, pull lazy).
+  - `Flow.Publisher` / Reactor `Flux` / RxJava `Observable` (reactive push).
+
+## Java Flow API (java.util.concurrent.Flow)
+
+Reactive Streams standard in the JDK (Java 9+):
+
+```java
+Flow.Publisher<Integer> publisher = subscriber -> {
+    subscriber.onSubscribe(new Flow.Subscription() {
+        int sent = 0;
+        public void request(long n) {
+            while (n-- > 0 && sent < 10) subscriber.onNext(sent++);
+            if (sent == 10) subscriber.onComplete();
+        }
+        public void cancel() { }
+    });
+};
+```
+
+Hard to use by hand: prefer Reactor or RxJava on top of `Flow.Publisher`.
+
+## Pattern: cooperative cancellation
+
+```java
+public interface Cancellation { void cancel(); }
+
+public Cancellation poll(Duration period, Consumer<String> onTick) {
+    AtomicBoolean alive = new AtomicBoolean(true);
+    scheduler.scheduleAtFixedRate(() -> {
+        if (alive.get()) onTick.accept(fetch());
+    }, 0, period.toMillis(), TimeUnit.MILLISECONDS);
+    return () -> alive.set(false);
+}
+
+// usage:
+Cancellation c = poll(Duration.ofSeconds(5), this::process);
+// later:
+c.cancel();
+```
+
+## Error handling
+
+Three common styles:
+
+1. **Everything in the success callback**: the error arrives as a nullable
+   parameter. Anti-pattern, encourages forgotten checks.
+
+2. **Separate callbacks** (`onSuccess` / `onError`): clear but verbose.
+
+3. **Result type** (Result, Either, Try): a value that encapsulates success
+   or failure.
+
+```java
+sealed interface Result<T> {
+    record Success<T>(T value) implements Result<T> {}
+    record Failure<T>(Throwable error) implements Result<T> {}
+}
+
+public void op(Consumer<Result<File>> cb) {
+    try { cb.accept(new Result.Success<>(loadFile())); }
+    catch (Throwable t) { cb.accept(new Result.Failure<>(t)); }
+}
+```
+
+In Kotlin/Scala this is the canonical pattern; in Java it needs sealed/record
+to read well.
+
+## Anti-pattern: callback registered and never removed
+
+```java
+button.addListener(l);   // who removes it? memory leak in a long-running app
+```
+
+Fix: a *Cancellation*/*Subscription* pattern returning a handle to
+de-register.

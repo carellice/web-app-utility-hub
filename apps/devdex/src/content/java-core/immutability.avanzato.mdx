@@ -1,0 +1,58 @@
+# Immutabilità: chicche under the hood
+
+## String Pool e intern()
+
+Le stringhe letterali vivono in una zona della heap chiamata **String Pool**. Due
+letterali identici puntano alla stessa istanza:
+
+```java
+String a = "ciao";
+String b = "ciao";
+System.out.println(a == b);          // true (stesso oggetto nel pool)
+
+String c = new String("ciao");
+System.out.println(a == c);          // false (oggetto creato fuori dal pool)
+System.out.println(a == c.intern()); // true (intern() rimette nel pool)
+```
+
+> ⚠️ Non abusare di `intern()` su input utente non vincolato: occupa permanentemente
+> spazio nel pool.
+
+## Substring e memory leak (storica)
+
+Fino a Java 6 `String.substring` condivideva l'array `char[]` originale con un offset.
+Se prendevi un piccolo prefix di una stringa enorme, l'array enorme restava vivo. Dal
+1.7.0_06 in poi `substring` copia, perdendo l'ottimizzazione ma evitando il leak.
+
+## Compact Strings (Java 9+)
+
+Internamente `String` non è più `char[]` ma `byte[]` con un coder (`LATIN1` o `UTF16`).
+Risparmio di memoria significativo per stringhe ASCII (dimezzata!).
+
+## final ≠ immutabile (chicca)
+
+`final` *non* basta per garantire immutabilità in presenza di:
+
+- **Reflection**: si può cambiare un `final` (vedi `AccessibleObject.setAccessible`).
+  Per i `final` *non-static*, la JVM **non** può cachare il valore in registri perché
+  uno scenario di costruzione non sicura può renderlo visibile prima di essere settato.
+- **Pubblicazione non sicura**: se l'istanza è esposta prima della fine del costruttore,
+  un altro thread può vederla con campi `final` non ancora inizializzati. Per questo
+  esiste l'**initialization safety guarantee** della JMM: i campi `final` sono garantiti
+  visibili agli altri thread *solo se* `this` non sfugge prima della fine del costruttore.
+
+```java
+public final class Bad {
+    private final int x;
+    public Bad(EventBus bus) {
+        bus.register(this);   // ⚠️ this sfugge: x può ancora essere 0 per chi lo legge
+        this.x = 42;
+    }
+}
+```
+
+## Pattern: Builder + classe immutabile
+
+Combinare un Builder mutabile a una classe immutabile è la firma di una buona API
+public quando i parametri sono molti o opzionali (vedi `HttpRequest.newBuilder()` in
+`java.net.http`).

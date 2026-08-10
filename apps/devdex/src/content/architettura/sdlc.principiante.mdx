@@ -1,0 +1,80 @@
+# SDLC — Software Development Life Cycle
+
+L'**SDLC** è l'insieme delle fasi per costruire software, dalla definizione del
+problema al ritiro.
+
+## Le fasi classiche
+
+1. **Requirements**: cosa serve, chi sono gli stakeholder, cosa misurare.
+2. **Design**: architettura, componenti, interfacce, sicurezza.
+3. **Implementation**: codice + test.
+4. **Testing**: unit, integration, system, UAT.
+5. **Deployment**: rilascio in produzione.
+6. **Maintenance**: bug fix, miglioramenti, monitoraggio.
+7. **Retirement**: end-of-life del sistema.
+
+## Modelli di processo
+
+### Waterfall
+
+Sequenza rigida: ogni fase finisce prima della successiva. Documenti formali.
+
+Pro: chiarezza, contratti, ambienti normati (PA, banking).
+Contro: nessun feedback fino a fine progetto, costi enormi se i requisiti cambiano.
+
+### Agile / Scrum
+
+Iterazioni brevi (**sprint** 1-4 settimane), backlog, retrospettive.
+
+```
+[Backlog] → [Sprint Planning] → [Daily] → [Review] → [Retro] → ricomincia
+```
+
+Pro: feedback rapido, adattamento ai cambiamenti, valore consegnato spesso.
+Contro: difficile per progetti con vincoli legali rigidi, può degenerare in "agile
+teatro".
+
+### DevOps
+
+Cultura + pratiche per ridurre il gap tra dev e ops. Pilastri:
+
+- **CI** (Continuous Integration): merge frequente, test automatici.
+- **CD** (Continuous Delivery/Deployment): rilasci automatici fino in produzione.
+- **IaC** (Infrastructure as Code): Terraform, Ansible.
+- **Observability**: log, metric, trace per capire i sistemi in prod.
+
+## Domande chiave a inizio progetto
+
+- Chi è l'utente finale?
+- Quali sono le **non-functional requirement** (performance, scalabilità,
+  disponibilità, sicurezza)?
+- Quali sono i vincoli tecnologici, di tempo, di budget?
+- Come misuro il successo?
+
+## Esempio: pipeline CI/CD
+
+```yaml
+# .github/workflows/ci.yml
+on:
+  push:
+    branches: [main]
+    
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { java-version: '21' }
+      - run: ./mvnw -B verify
+      - run: ./mvnw deploy
+```
+
+Ogni push parte una pipeline che:
+
+1. Checkout codice.
+2. Build + test.
+3. Build container.
+4. Deploy in staging.
+5. Test end-to-end.
+6. Deploy in production (manual approval o automatico).

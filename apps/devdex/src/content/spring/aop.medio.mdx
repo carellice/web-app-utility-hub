@@ -1,0 +1,146 @@
+# AOP — Proxy, pointcut e composizione
+
+## Spring AOP usa proxy
+
+Spring AOP è basato su **runtime proxy** (JDK dynamic proxy o CGLIB). Implicazioni:
+
+- L'advice scatta solo per invocazioni **esterne**: chiamata `this.metodoAnnotato()`
+  da un altro metodo dello stesso bean **bypassa** il proxy.
+- Solo metodi **public** sono intercettati di default (CGLIB intercetta anche
+  `protected`).
+- L'aspect è applicato sulla **classe target** indirizzata dal proxy.
+
+```java
+@Service
+public class OrderService {
+    @Transactional public void save() { ... }
+    public void run() {
+        save();   // ⚠️ niente transazione: invocazione interna
+    }
+}
+```
+
+## AspectJ vs Spring AOP
+
+| Aspetto | Spring AOP | AspectJ |
+|---|---|---|
+| Tecnica | Runtime proxy | Compile/load-time weaving |
+| Visibilità | metodi pubblici di bean | tutto (anche field, costruttori, private) |
+| Self-invocation | non intercettata | intercettata |
+| Dipendenze | nessuna esterna | weaver AspectJ |
+| Performance | leggero overhead | minore overhead, ma build più complesso |
+
+In Spring puoi attivare AspectJ "load-time weaving" con
+`@EnableLoadTimeWeaving` + agent JVM.
+
+## Ordine degli aspect
+
+Più aspect possono matchare lo stesso joinpoint. L'ordine è controllabile con
+`@Order(int)` o l'interfaccia `Ordered`.
+
+```java
+@Aspect @Order(1) class SecurityAspect { ... }   // più esterno
+@Aspect @Order(2) class TimingAspect   { ... }   // più interno
+```
+
+Esecuzione (around): `Sec.before → Time.before → metodo → Time.after → Sec.after`.
+
+## Pointcut riutilizzabili
+
+```java
+@Aspect @Component
+public class Pointcuts {
+    @Pointcut("execution(public * com.example.service..*(..))")
+    public void allServices() {}
+
+    @Pointcut("@annotation(com.example.Audit)")
+    public void audited() {}
+}
+
+@Aspect @Component
+public class Cross {
+    @Before("com.example.aop.Pointcuts.allServices() && com.example.aop.Pointcuts.audited()")
+    public void log(JoinPoint jp) { ... }
+}
+```
+
+## Argument capture
+
+```java
+@Around("execution(* save(..)) && args(entity,..)")
+public Object tag(ProceedingJoinPoint pjp, Entity entity) throws Throwable {
+    MDC.put("entityId", entity.getId());
+    try { return pjp.proceed(); }
+    finally { MDC.remove("entityId"); }
+}
+```
+
+Cattura il primo argomento `entity` e lo usa direttamente.
+
+## Use-case: retry con annotazione
+
+```java
+@Retention(RUNTIME) @Target(METHOD)
+public @interface Retryable {
+    int attempts() default 3;
+    long delayMs() default 200;
+}
+
+@Aspect @Component
+public class RetryAspect {
+    @Around("@annotation(retryable)")
+    public Object retry(ProceedingJoinPoint pjp, Retryable retryable) throws Throwable {
+        int left = retryable.attempts();
+        Throwable last = null;
+        while (left-- > 0) {
+            try { return pjp.proceed(); }
+            catch (Throwable t) {
+                last = t;
+                Thread.sleep(retryable.delayMs());
+            }
+        }
+        throw last;
+    }
+}
+```
+
+(In prod userai Resilience4j; l'esempio mostra il pattern.)
+
+## Caching con AOP
+
+`@Cacheable`, `@CacheEvict`, `@CachePut` sono aspect Spring out-of-the-box:
+
+```java
+@Service
+public class CountryService {
+    @Cacheable("countries")
+    public List<Country> all() { return repo.findAll(); }
+}
+```
+
+Configurazione:
+
+```java
+@SpringBootApplication
+@EnableCaching
+public class App { ... }
+```
+
+## Trappole
+
+- **Self-invocation** silenziosa.
+- **`private` methods** non intercettati.
+- **Aspect non `@Component`** non viene registrato.
+- **`@Transactional` su classe finale** con CGLIB → errore di startup.
+- **CGLIB non gestisce ben i costruttori**: la classe target viene istanziata 2 volte
+  (proxy + target). Costruttori con side effect = brutta sorpresa.
+
+## Debugging
+
+```yaml
+logging:
+  level:
+    org.springframework.aop: TRACE
+```
+
+Mostra quali advice agganciano quali joinpoint a startup.

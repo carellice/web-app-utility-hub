@@ -1,0 +1,126 @@
+# JVM internals — GC, JIT, profiling
+
+## Garbage Collector: scegliere il giusto
+
+| GC | Quando |
+|---|---|
+| **Serial** | App piccole, mono-thread, embedded |
+| **Parallel** | Throughput puro, batch |
+| **G1** (default Java 9+) | Bilanciato, pause sub-secondo |
+| **ZGC** | Pause < 1 ms, heap fino a TB |
+| **Shenandoah** | Concurrent compaction, low-pause |
+| **Epsilon** | Niente GC (test allocazione) |
+
+Switching:
+
+```bash
+-XX:+UseG1GC                          # G1
+-XX:+UseZGC                            # ZGC
+-XX:+UseShenandoahGC                   # Shenandoah
+-XX:+UseParallelGC                     # Parallel
+```
+
+## Logging GC
+
+```bash
+-Xlog:gc*=info:file=gc.log:time,uptime,level,tags
+```
+
+Analizzare con: GCEasy, GCViewer, gceasy.io.
+
+Cose da guardare:
+
+- **Frequency** dei GC.
+- **Pause**: p50/p99/max.
+- **Promotion rate**: quanto cresce Old per secondo.
+- **Allocation rate**: quanto Eden si riempie al secondo.
+
+## JIT compiler
+
+La JVM ha due compiler:
+
+- **C1** (client): veloce, ottimizzazioni basilari.
+- **C2** (server): più lento a compilare, codice più rapido.
+
+Tieredcompilation: parte interpretato → C1 → C2.
+
+Inline aggressivo:
+
+```java
+public int sum(int a, int b) { return a + b; }
+// usato 10000 volte → JIT lo inlinea ovunque
+```
+
+Caveat: metodi grandi (> 325 byte di bytecode default) NON vengono inlineati. Per
+hot path, mantenere i metodi piccoli.
+
+## Escape analysis
+
+Il JIT può capire se un oggetto **scappa** dal metodo. Se non scappa, può:
+
+- Allocarlo sullo **stack** invece che sulla heap (scalar replacement).
+- Eliminare lock (lock elision).
+
+```java
+public int compute() {
+    Point p = new Point(1, 2);  // probabilmente eliminato dall'allocation
+    return p.x + p.y;
+}
+```
+
+Effetto: meno pressione GC, meno cache miss.
+
+## Profiling
+
+Strumenti:
+
+- **JFR (Java Flight Recorder)**: built-in, basso overhead (< 2%).
+  ```bash
+  jcmd <pid> JFR.start name=my duration=60s filename=app.jfr
+  ```
+- **JDK Mission Control**: GUI per analizzare JFR.
+- **async-profiler**: flame graph, low overhead.
+- **VisualVM**: GUI tutto-in-uno, dev.
+- **Java Mission Control + JMC Agent**: instrumentation specifiche.
+
+## Memory leak: come trovarli
+
+1. **Heap dump** quando OOM:
+   ```bash
+   -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heap.hprof
+   ```
+2. Aprire in **Eclipse MAT** (Memory Analyzer Tool).
+3. Cercare "dominator tree": chi tiene viva la maggior parte della heap.
+4. Path to GC roots: chi impedisce alla classe di essere collected.
+
+Tipi tipici di leak:
+
+- Static collections che crescono indefinitely.
+- Listener registrati e mai rimossi.
+- ThreadLocal in pool thread che non vengono ripuliti.
+
+## ThreadLocal
+
+```java
+private static final ThreadLocal<SimpleDateFormat> FMT =
+    ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd"));
+```
+
+Pro: stato per-thread.
+Contro: in pool thread (Tomcat, FJP), lo stato sopravvive tra request → leak/PII.
+Sempre `remove()` quando finito.
+
+## OutOfMemoryError: tipi diversi
+
+- `OutOfMemoryError: Java heap space` → heap finito.
+- `OutOfMemoryError: GC overhead limit exceeded` → GC > 98% del tempo per < 2% liberato.
+- `OutOfMemoryError: Metaspace` → troppe classi caricate.
+- `OutOfMemoryError: Direct buffer memory` → buffer NIO esauriti.
+- `OutOfMemoryError: unable to create new native thread` → limite OS o `-Xss` troppo grande.
+
+## Tuning di startup
+
+- `-Xshare:auto` (CDS - Class Data Sharing): condividi classi precaricate.
+- `-XX:TieredStopAtLevel=1`: ferma il JIT al C1 (startup veloce, peak lento).
+- `--enable-preview` per feature in preview.
+- AOT compilation (`jaotc` / GraalVM native-image).

@@ -1,0 +1,152 @@
+# OOP avanzato — Dispatching, varianza, internals
+
+## Dispatch dinamico: vtable
+
+Per ogni classe, la JVM costruisce una **vtable** (virtual method table) con i puntatori
+ai metodi virtuali (di istanza non-`final`/non-`private`). Una chiamata
+`account.deposit(50)` compila a `invokevirtual`:
+
+```text
+load this
+load 50
+invokevirtual Account.deposit:(J)V
+```
+
+A runtime la JVM legge la vtable dell'header dell'oggetto e salta. Costo:
+indirezione, ma il JIT applica **inlining** se la call site è "monomorfica" (sempre la
+stessa classe runtime) o "bimorfica" (due tipi). Oltre, smette di inlinare e fa salto
+indiretto.
+
+> 💡 Per questo i benchmark con tante implementazioni di un'interfaccia chiamate in modo
+> mescolato (megamorphic) sono più lenti.
+
+## Static dispatch vs dynamic dispatch
+
+- `static` / `private` / `final` / `invokestatic`/`invokespecial`: noti a compile-time.
+- istanza polimorfica: `invokevirtual`.
+- interfacce: `invokeinterface` (storicamente più lento, oggi indistinguibile col JIT).
+- `default` method: `invokeinterface` con fallback alla default.
+
+## Diamond problem nelle interfacce
+
+Java 8 permette `default` method. Cosa succede se due interfacce ne dichiarano uno con
+la stessa firma?
+
+```java
+interface A { default String hi() { return "A"; } }
+interface B { default String hi() { return "B"; } }
+class C implements A, B {
+    // ⚠️ compile error: "C inherits unrelated defaults"
+    @Override public String hi() { return A.super.hi() + B.super.hi(); }
+}
+```
+
+Devi risolvere esplicitamente (regola del "most specific" interface; se incompatibili,
+override obbligatorio).
+
+## Covariant return types
+
+Dal Java 5, una sottoclasse può restringere il tipo di ritorno:
+
+```java
+class Animal { Animal clone() { ... } }
+class Cat extends Animal {
+    @Override Cat clone() { ... }   // ✅ covariante
+}
+```
+
+Compila a un **bridge method** che mantiene la firma `Animal clone()` per il dispatch
+virtuale, e delega a `Cat clone()`.
+
+## Varianza e generics
+
+Java ha **invariant generics** by default: `List<Cat>` non è `List<Animal>`.
+Si usano wildcard PECS (Producer-Extends, Consumer-Super):
+
+```java
+// produce: posso solo leggere
+List<? extends Animal> animals = new ArrayList<Cat>();
+Animal a = animals.get(0);   // OK
+animals.add(new Cat());       // ❌
+
+// consuma: posso solo aggiungere
+List<? super Cat> cats = new ArrayList<Animal>();
+cats.add(new Cat());          // OK
+Object o = cats.get(0);       // posso leggere solo come Object
+```
+
+## Object header (HotSpot)
+
+Ogni istanza ha un header (~12–16 byte su HotSpot 64-bit con compressed oops):
+
+```text
+[ mark word | klass pointer | padding ][ campi ]
+```
+
+- **mark word**: identity hash, lock state, GC age, biased lock (≤ Java 14).
+- **klass pointer**: punta alla classe (la vtable).
+
+Da Java 15+, biased locking è deprecato; da Java 21 c'è Lilliput in lavorazione per
+ridurre l'header.
+
+## Inner / nested / anonymous
+
+| Tipo | Sintassi | Stato implicito |
+|---|---|---|
+| Static nested | `static class A {}` dentro `B` | nessuno |
+| Inner | `class A {}` dentro `B` non-static | implicit `B.this` reference |
+| Local | dentro un metodo | accesso a final/effectively final |
+| Anonymous | `new Foo() { ... }` | come local + super specificato |
+| Lambda | `(x) -> ...` | come anonymous ma **no `this`** outer pinning forte |
+
+> ⚠️ Una `inner class` mantiene un riferimento implicito alla outer → memory leak
+> classico (es. inner class che sopravvive all'Activity Android). Soluzione: `static
+> nested` + weak reference.
+
+## Reflection vs MethodHandles vs invokedynamic
+
+- **Reflection**: API pubblica, lenta, comoda, sensibile a `setAccessible`.
+- **MethodHandles** (Java 7+): più veloce della reflection, supporta inlining JIT.
+- **invokedynamic** (Java 7): istruzione bytecode che permette di "linkare" call site
+  a runtime. È il motore di:
+  - Lambda (`LambdaMetafactory`).
+  - String concatenation (Java 9+, `StringConcatFactory`).
+  - Switch su pattern (Java 21+).
+
+## Final, sealed, e ottimizzazioni JIT
+
+Una classe `final` o `sealed` con poche implementazioni consente al JIT di assumere
+monomorphic call site → inline aggressivo. Marcare `final` non è solo "stile": è
+performance.
+
+## Composition: il pattern Decorator
+
+```java
+public class LoggingNotifier implements Notifier {
+    private final Notifier delegate;
+    public LoggingNotifier(Notifier d) { this.delegate = d; }
+    public void notify(String msg) {
+        long t = System.nanoTime();
+        try { delegate.notify(msg); }
+        finally { log.info("notify took {}ns", System.nanoTime() - t); }
+    }
+}
+```
+
+Combini più decorator a runtime:
+`new RetryingNotifier(new LoggingNotifier(new EmailNotifier()))`.
+
+## Trappole storiche
+
+- `equals` asimmetrico tra superclasse e sottoclasse → contratto rotto in `Set/Map`.
+- `clone()` shallow vs deep: quasi sempre meglio un copy constructor o un Builder.
+- `finalize()`: deprecato. Usa `try-with-resources` + `Cleaner` (Java 9+).
+- `Serializable`: deprecated direction; valuta Jackson/Protobuf per persistere oggetti.
+
+## Domande tipiche al colloquio
+
+- *"Cos'è una vtable e quando il JIT può inlinare un metodo virtuale?"*
+- *"Come funziona invokedynamic per le lambda?"* — call site indirizzato la prima volta da `LambdaMetafactory`.
+- *"PECS: cosa significa?"*
+- *"Perché `final` può migliorare le performance?"*
+- *"Differenze tra static nested e inner class? Implicazioni per memory leak."*

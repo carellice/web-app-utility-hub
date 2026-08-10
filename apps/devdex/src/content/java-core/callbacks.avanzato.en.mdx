@@ -1,0 +1,135 @@
+# Advanced callbacks — Continuations, structured concurrency
+
+## Continuation-passing style (CPS)
+
+A callback is essentially a **continuation**: "here is what to do when
+you're done". Languages with `async/await` (C#, Kotlin, JS) compile
+imperative code into CPS at compile time. Java has no `async/await` in the
+language, but:
+
+- `CompletableFuture` offers it as a runtime API.
+- Reactor/RxJava offer it as a DSL.
+- Project Loom (virtual threads) *bypasses* the problem: "blocking" is
+  handled by the scheduler.
+
+## Memory model and visibility
+
+When a callback is invoked on a thread different from the one that
+registered it, **visibility is not free**:
+
+```java
+// thread A
+config.setValue("x");
+api.registerListener(c -> System.out.println(c.value()));
+
+// thread B in the callback: does it always see "x"?
+```
+
+Yes, if the listener registration `happens-before` the invocation.
+Concurrent queues (`ConcurrentLinkedQueue`, `Executor`) guarantee this. But
+if you build the pipeline manually, watch out for the memory model
+(`volatile`, locks).
+
+## Structured concurrency (Java 21+)
+
+JEP 453 (preview) introduces `StructuredTaskScope`. It treats a set of tasks
+as a unit with a well-defined lifecycle:
+
+```java
+try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+    Subtask<User> u = scope.fork(() -> fetchUser(id));
+    Subtask<Cart> c = scope.fork(() -> fetchCart(id));
+
+    scope.join();         // waits for all
+    scope.throwIfFailed();// if one fails, propagate
+
+    return new Checkout(u.get(), c.get());
+}
+```
+
+Advantages over nested callbacks:
+
+- **Guaranteed lifetime**: all children finish before exiting the block.
+- **Propagated cancellation**.
+- **Readable stack traces**.
+
+## Listener leak: the finalizer problem
+
+Pre-Java 9 it was common to register listeners in constructors that
+prevented the host object from being finalized. Today:
+
+- `WeakReference` for "weak" listeners.
+- `Subscription` pattern with `close()`.
+- `AutoCloseable` listeners + try-with-resources.
+
+```java
+try (Subscription s = bus.subscribe(this::onEvent)) {
+    runSomething();
+}   // s.close() called → guaranteed de-registration
+```
+
+## Reentrant callback
+
+A callback that, during its execution, triggers another that calls the
+first. Without protection → stack overflow or inconsistent state.
+
+```java
+publisher.subscribe(item -> {
+    if (item.isImportant()) publisher.fire(item);   // ⚠️ recursion!
+});
+```
+
+Mitigations: event queues, reentrancy counter, "fire only when idle".
+
+## Backpressure with callbacks
+
+Fast producer + slow consumer + push-based callbacks = memory saturation.
+This is why **backpressure** exists in Reactive Streams: the consumer
+declares "I can accept N", the producer respects the limit.
+
+```java
+publisher.subscribe(new Flow.Subscriber<Item>() {
+    Flow.Subscription s;
+    public void onSubscribe(Flow.Subscription s) { this.s = s; s.request(10); }
+    public void onNext(Item i) { process(i); s.request(1); }
+    public void onError(Throwable t) { /* ... */ }
+    public void onComplete() { /* ... */ }
+});
+```
+
+## Performance: cost per callback
+
+Every registered callback:
+
+- Lambda → **one instance** (singleton if it doesn't capture variables,
+  allocated if it does).
+- Anonymous inner class → a heavier instance (implicit outer reference).
+- `MethodReference` → singleton if it doesn't capture `this`.
+
+For hot paths with millions of registrations, prefer `method reference` or
+"non-capturing lambda".
+
+## Java 8 lambda metafactory
+
+A lambda is not allocated as an anonymous class: `invokedynamic` calls
+`LambdaMetafactory`, which generates a lightweight class on the fly and
+caches it. Result: first invocation a bit slower (linking), subsequent
+invocations very light.
+
+## When a callback is NOT the right choice
+
+- You have a linear pipeline → use `CompletableFuture` / Reactor / virtual
+  threads.
+- You need a stream of values → use Flow / Flux.
+- You have structured tasks → use structured concurrency (Java 21+).
+- You are building a public API → return `CompletionStage<T>` instead of a
+  callback (more composable).
+
+## Typical interview questions
+
+- *"How would you turn a callback API into a `CompletableFuture`-based
+  one?"*
+- *"What is callback hell and how do you fix it?"*
+- *"Single-fire vs multi-fire callbacks: which Java patterns fit best?"*
+- *"What guarantees visibility between registration and invocation?"*
+- *"What changes with structured concurrency?"*

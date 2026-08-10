@@ -1,0 +1,173 @@
+# GraphQL — Pattern intermedi
+
+## N+1 e DataLoader
+
+Resolver naive su una lista:
+
+```java
+@SchemaMapping
+public List<Order> orders(User u) {
+    return repo.findByUserId(u.id());  // 1 query PER user → N+1
+}
+```
+
+Soluzione: **DataLoader**. Raggruppa le richieste in batch:
+
+```java
+@Bean
+public BatchLoaderRegistry batchLoaders(OrderRepository repo) {
+    return r -> r.forTypePair(String.class, List.class)
+        .registerMappedBatchLoader((userIds, env) -> {
+            Map<String, List<Order>> byUser = repo.findByUserIdIn(userIds).stream()
+                .collect(Collectors.groupingBy(Order::userId));
+            return Mono.just(byUser);
+        });
+}
+```
+
+Un'unica query con `IN (...)` per tutti gli user del payload.
+
+## Schema design: nodes & connections (Relay)
+
+Pattern Relay per pagination:
+
+```graphql
+type Query {
+  orders(first: Int, after: String): OrderConnection!
+}
+
+type OrderConnection {
+  edges: [OrderEdge!]!
+  pageInfo: PageInfo!
+}
+
+type OrderEdge {
+  node: Order!
+  cursor: String!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+```
+
+Cursor-based, scalabile. Difficile da implementare a mano, ma standard nel mondo
+GraphQL serio.
+
+## Errori
+
+GraphQL ha un campo `errors` accanto a `data`. Errori non bloccanti vivono lì,
+mentre `data` può essere parzialmente popolato:
+
+```json
+{
+  "data": { "user": { "name": "Anna", "orders": null } },
+  "errors": [{ "message": "DB timeout", "path": ["user", "orders"] }]
+}
+```
+
+Pattern: estensioni dell'errore per categorizzare:
+
+```json
+{
+  "errors": [{
+    "message": "Forbidden",
+    "extensions": { "code": "FORBIDDEN", "classification": "AUTH" }
+  }]
+}
+```
+
+## Autenticazione/autorizzazione
+
+Auth a livello transport (header `Authorization`), authz a livello campo (Spring
+Security `@PreAuthorize` sui resolver).
+
+```java
+@PreAuthorize("hasRole('ADMIN')")
+@QueryMapping
+public List<User> allUsers() { ... }
+```
+
+Field-level: aspetto importante. Es. non tutti possono vedere `User.email`.
+
+```java
+@PostAuthorize("returnObject.userId == authentication.name")
+@SchemaMapping
+public List<Order> orders(User user) { ... }
+```
+
+## Schema federation
+
+Più team possiedono un grafo unico via Apollo Federation:
+
+- Ogni servizio espone uno *subgraph*.
+- Un *gateway* combina i subgraph in supergraph (a build time).
+- Le entity sono "estensibili": `extend type User @key(fields: "id")`.
+
+Stack maturo: Apollo Router (Rust), Hot Chocolate (.NET), Mercurius (Node).
+
+## Subscription via WebSocket
+
+Spring for GraphQL supporta WebSocket. Lato client (Apollo):
+
+```js
+const wsLink = new GraphQLWsLink({ url: 'ws://localhost/graphql' });
+```
+
+Connessione mantenuta finché il client è online. Server-Sent Events (SSE) è
+un'alternativa più semplice per push uni-direzionale.
+
+## Persisted queries
+
+Per ridurre payload e migliorare cache:
+
+1. Il client invia solo un hash della query (es. `sha256`).
+2. Il server lookup-a la query corrispondente.
+
+Effetti:
+
+- HTTP GET cacheabile (CDN).
+- Whitelist implicita: rifiuti query sconosciute.
+
+Pattern usato in produzione da grandi consumer (Apollo Persisted Queries).
+
+## Caching
+
+GraphQL non sfrutta cache HTTP nativa con POST. Strategie:
+
+1. **Lato client**: Apollo cache (normalized).
+2. **Persisted queries + GET**: torna cacheabile via CDN.
+3. **Field-level cache** server-side: Redis o in-memory per campi statici.
+
+## Validation
+
+Lo schema valida automaticamente. Per regole di dominio, validazione applicativa:
+
+```java
+@QueryMapping
+public Order order(@Argument @NotNull @UUID String id) { ... }
+```
+
+Bean Validation 3.0 + Hibernate Validator.
+
+## Testing
+
+`@GraphQlTest` in Spring per testing slice-only. Mock dei service, assert sulle
+risposte JSON con `GraphQlTester`:
+
+```java
+@GraphQlTest(OrderResolver.class)
+class OrderResolverTest {
+    @Autowired GraphQlTester tester;
+    @MockBean OrderService svc;
+
+    @Test
+    void findsOrder() {
+        when(svc.find("o1")).thenReturn(new Order("o1", 9.9));
+        tester.document("{ order(id: \"o1\") { id total } }")
+              .execute()
+              .path("order.total").entity(Double.class).isEqualTo(9.9);
+    }
+}
+```

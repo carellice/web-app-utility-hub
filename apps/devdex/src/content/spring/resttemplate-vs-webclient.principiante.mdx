@@ -1,0 +1,43 @@
+# RestTemplate vs WebClient
+
+`RestTemplate` è il client HTTP storico di Spring (sincrono, bloccante). `WebClient` è
+il suo successore moderno (asincrono, non-blocking, reactive).
+
+```java
+// RestTemplate - blocking
+User u = rest.getForObject("/users/{id}", User.class, 42);
+
+// WebClient - non-blocking
+Mono<User> u = web.get().uri("/users/{id}", 42)
+                  .retrieve()
+                  .bodyToMono(User.class);
+```
+
+## Quando usare cosa
+
+| Scenario | Scelta |
+|---|---|
+| Applicazione MVC tradizionale, traffico modesto | RestTemplate (o WebClient blocking) |
+| WebFlux, alto throughput, streaming | WebClient |
+| Nuovo codice 2025+ | WebClient (RestTemplate è in maintenance) |
+
+> ℹ️ Spring 6 ha introdotto `RestClient`, una nuova API blocking con la stessa
+> "fluent style" di WebClient. È la scelta consigliata per codice MVC nuovo.
+
+## Esempio: GET + headers
+
+```java
+ResponseEntity<List<Post>> response = rest.exchange(
+    "https://api.example.com/posts",
+    HttpMethod.GET,
+    new HttpEntity<>(headers),
+    new ParameterizedTypeReference<List<Post>>() {}
+);
+```
+
+```java
+Flux<Post> posts = web.get().uri("/posts")
+    .headers(h -> h.setBearerAuth(token))
+    .retrieve()
+    .bodyToFlux(Post.class);
+```

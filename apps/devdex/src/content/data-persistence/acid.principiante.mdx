@@ -1,0 +1,31 @@
+# Proprietà A.C.I.D.
+
+ACID è l'acronimo delle quattro garanzie che un DBMS transazionale offre:
+
+| Lettera | Significato |
+|---|---|
+| **A**tomicity   | Una transazione è "tutto o niente": o tutte le operazioni vanno a buon fine, o nessuna. |
+| **C**onsistency | Una transazione porta il DB da uno stato valido a un altro stato valido (vincoli, FK, check). |
+| **I**solation   | Le transazioni concorrenti non si vedono a metà del lavoro. |
+| **D**urability  | Una volta committata, la transazione sopravvive a crash. |
+
+## Esempio: bonifico bancario
+
+```sql
+BEGIN;
+  UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+  UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;
+```
+
+- **A**: se la seconda UPDATE fallisce, anche la prima viene annullata.
+- **C**: nessuna riga ha mai un balance negativo (se c'è un `CHECK`).
+- **I**: un'altra transazione non vede né "100 sottratti ma non aggiunti" né
+  l'inverso.
+- **D**: dopo `COMMIT`, anche se la JVM crasha, il bonifico è permanente.
+
+## Cosa NON è ACID
+
+- File flat / log puri non garantiscono Atomicity.
+- Molti motori NoSQL hanno isolation eventuale o di sola "single document".
+- Cache (Redis di base) non offre Durability senza configurazione AOF/RDB.

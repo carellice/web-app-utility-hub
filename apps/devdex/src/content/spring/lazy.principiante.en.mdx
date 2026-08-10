@@ -1,0 +1,87 @@
+# @Lazy in Spring
+
+By default, Spring creates all **singleton** beans *eagerly* at startup. With
+`@Lazy` you delay creation (or injection) until first use.
+
+```java
+@Component
+@Lazy
+public class HeavyService {
+    public HeavyService() {
+        System.out.println("created");   // printed on first request
+    }
+}
+```
+
+## The 3 typical uses
+
+### 1. Lazy bean
+
+```java
+@Component @Lazy
+public class ReportGenerator { ... }
+```
+
+The bean is not instantiated at startup. Good for rarely-used, heavy services.
+
+### 2. Lazy injection (proxy)
+
+```java
+@Service
+public class A {
+    private final B b;
+    public A(@Lazy B b) { this.b = b; }
+}
+```
+
+`A` starts immediately. `b` is a **proxy**: the real `B` instance is created
+on the first call on `b`.
+
+### 3. Everything lazy
+
+```yaml
+spring:
+  main:
+    lazy-initialization: true
+```
+
+All beans become lazy. Very fast startup, but:
+
+- Configuration errors surface **on the first request**.
+- `/actuator/health` does not reflect bugs in the bean graph.
+
+## Example: breaking a dependency cycle
+
+```java
+@Service
+public class A {
+    private final B b;
+    public A(@Lazy B b) { this.b = b; }  // proxy: breaks the cycle
+}
+@Service
+public class B {
+    private final A a;
+    public B(A a) { this.a = a; }
+}
+```
+
+Spring 2.6+ disables cycles by default; `@Lazy` is the minimal workaround. The
+better fix: revisit the design.
+
+## Effects
+
+- **Startup time**: faster if you have many unused beans.
+- **First request latency**: higher (the bean is created now).
+- **Error diagnosis**: worse (deferred errors).
+
+## When to use it
+
+- Heavy services (initial cache, ML models, big connections) used rarely.
+- Unit/integration tests where you want minimal instantiation.
+- Breaking cycles when restructuring is too costly.
+
+## When NOT to use it
+
+- In production on every bean: hides config bugs.
+- Beans essential to the request path: you pay latency on the first "lucky"
+  request.

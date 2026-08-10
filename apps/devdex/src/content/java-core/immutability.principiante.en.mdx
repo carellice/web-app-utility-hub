@@ -1,0 +1,33 @@
+# Mutability & Immutability
+
+An object is **immutable** when, once created, its state can no longer
+change. In Java the canonical example is `String`:
+
+```java
+String s = "hello";
+s.toUpperCase();          // returns "HELLO" but does not modify s
+System.out.println(s);    // "hello"
+
+s = s.toUpperCase();      // now s points to a new object
+System.out.println(s);    // "HELLO"
+```
+
+## Why does it matter?
+
+- **Thread-safety for free**: nobody can modify the state → no race
+  conditions.
+- **Stable hash code**: immutable objects are great as `HashMap` keys /
+  `HashSet` elements.
+- **Easier to reason about**: an immutable variable always holds the same
+  value as long as it exists.
+
+## Common immutable types in the JDK
+
+- `String`
+- Primitive wrappers: `Integer`, `Long`, `Double`, `Boolean`, …
+- `LocalDate`, `LocalDateTime`, `Instant` (`java.time`)
+- `BigDecimal`, `BigInteger`
+
+> 💡 An immutable object is not the same as a `final` variable. `final`
+> prevents **reassigning** the variable, not modifying the object it points
+> to.

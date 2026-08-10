@@ -1,0 +1,86 @@
+# @Lazy in Spring
+
+Di default, Spring crea tutti i bean **singleton** in modo *eager* allo startup. Con
+`@Lazy` posticipi la creazione (o l'iniezione) al primo utilizzo.
+
+```java
+@Component
+@Lazy
+public class HeavyService {
+    public HeavyService() {
+        System.out.println("creato");   // stampato alla prima richiesta
+    }
+}
+```
+
+## I 3 usi tipici
+
+### 1. Bean lazy
+
+```java
+@Component @Lazy
+public class ReportGenerator { ... }
+```
+
+Il bean non viene istanziato a startup. Buono per servizi raramente usati e pesanti.
+
+### 2. Iniezione lazy (proxy)
+
+```java
+@Service
+public class A {
+    private final B b;
+    public A(@Lazy B b) { this.b = b; }
+}
+```
+
+`A` parte subito. `b` è un **proxy**: l'istanza reale di `B` viene creata alla prima
+invocazione su `b`.
+
+### 3. Tutto lazy
+
+```yaml
+spring:
+  main:
+    lazy-initialization: true
+```
+
+Tutti i bean diventano lazy. Velocissimo startup, ma:
+
+- Errori di configurazione emergono **alla prima request**.
+- Health check `/actuator/health` non riflette bug nel grafo dei bean.
+
+## Esempio: spezzare cicli di dipendenza
+
+```java
+@Service
+public class A {
+    private final B b;
+    public A(@Lazy B b) { this.b = b; }  // proxy: rompe il ciclo
+}
+@Service
+public class B {
+    private final A a;
+    public B(A a) { this.a = a; }
+}
+```
+
+Spring 2.6+ disabilita i cicli di default; `@Lazy` è il workaround minimo. Soluzione
+migliore: rivedere il design.
+
+## Effetti
+
+- **Startup time**: più veloce se hai molti bean inutilizzati.
+- **First request latency**: più alta (il bean si crea ora).
+- **Diagnosi errori**: peggiore (errori posticipati).
+
+## Quando usarlo
+
+- Servizi pesanti (cache iniziale, modelli ML, connessioni grosse) usati raramente.
+- Test di unit/integration dove vuoi instanziare poco.
+- Spezzare cicli quando ristrutturare è troppo costoso.
+
+## Quando non usarlo
+
+- In produzione su tutti i bean: nasconde bug di config.
+- Bean essenziali al request path: paghi la latenza alla prima request "fortunata".

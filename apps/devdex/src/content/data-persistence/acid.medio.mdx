@@ -1,0 +1,53 @@
+# ACID — Isolation e fenomeni concorrenti
+
+Quando due transazioni si sovrappongono, possono manifestarsi 4 **fenomeni**:
+
+1. **Dirty read**: leggi dati non ancora committati.
+2. **Non-repeatable read**: la stessa SELECT in due punti della transazione dà
+   risultati diversi (qualcuno ha UPDATE tra le due).
+3. **Phantom read**: la stessa range SELECT restituisce nuove righe (qualcuno ha
+   INSERT tra le due).
+4. **Lost update**: due UPDATE concorrenti, una sovrascrive l'altra.
+
+I livelli ISO SQL li mitigano:
+
+| Livello | Dirty | Non-repeatable | Phantom |
+|---|---|---|---|
+| `READ UNCOMMITTED` | ❌ permesso | ❌ | ❌ |
+| `READ COMMITTED`   | ✅ no | ❌ | ❌ |
+| `REPEATABLE READ`  | ✅ no | ✅ no | ❌ |
+| `SERIALIZABLE`     | ✅ no | ✅ no | ✅ no |
+
+## Default per DB
+
+- **PostgreSQL**: `READ COMMITTED`.
+- **MySQL InnoDB**: `REPEATABLE READ` (e impedisce anche i phantom con gap-locks).
+- **Oracle**: `READ COMMITTED`, ma con snapshot read.
+- **SQL Server**: `READ COMMITTED`, con optimistic via `READ_COMMITTED_SNAPSHOT`.
+
+## MVCC
+
+PostgreSQL e MySQL InnoDB usano **MVCC**: ogni transazione vede uno snapshot del
+DB. Le letture non bloccano le scritture e viceversa.
+
+```text
+T1: BEGIN;             SELECT * FROM t WHERE id = 1;  -- vede versione v0
+                                                          T2: UPDATE t SET ...;
+T1:                    SELECT * FROM t WHERE id = 1;  -- vede ANCORA v0
+```
+
+## Locking strategies
+
+- **Pessimistic**: `SELECT ... FOR UPDATE` blocca la riga.
+- **Optimistic**: una colonna `version`; al `UPDATE ... WHERE id = ? AND version = ?`
+  se il count = 0, qualcuno ti ha bruciato → conflict.
+
+## Atomic UPDATE
+
+Per evitare lost update senza locking esplicito:
+
+```sql
+UPDATE accounts SET balance = balance - 100 WHERE id = 1 AND balance >= 100;
+```
+
+Il check + decremento avviene atomicamente nel DB.

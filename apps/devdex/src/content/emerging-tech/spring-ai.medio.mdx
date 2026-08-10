@@ -1,0 +1,79 @@
+# Spring AI / LangChain4j — RAG e Tool
+
+## RAG (Retrieval Augmented Generation)
+
+Il pattern: l'LLM da solo non sa rispondere su tuoi documenti privati / recenti.
+
+```text
+Domanda  →  Embedding  →  VectorStore similarity search  →  Contesto
+                                                                ↓
+                                                       LLM(prompt + contesto)  →  Risposta
+```
+
+```java
+// Spring AI
+VectorStore store = ...;
+List<Document> docs = new TokenTextSplitter().apply(loader.load());
+store.add(docs);
+
+String prompt = """
+    Rispondi usando SOLO il contesto:
+    Contesto:
+    {context}
+    Domanda: {q}
+    """;
+
+List<Document> hits = store.similaritySearch(SearchRequest.query(q).withTopK(5));
+String answer = chat.prompt()
+    .user(u -> u.text(prompt).param("context", join(hits)).param("q", q))
+    .call().content();
+```
+
+VectorStore supportati: PgVector, Chroma, Milvus, Redis, Pinecone, Qdrant, in-memory
+(test).
+
+## Function calling
+
+L'LLM decide di chiamare una tua funzione Java se le serve.
+
+```java
+record Weather(String city, double tempC) {}
+
+@Tool("Ottieni il meteo di una città")
+public Weather weather(@P("city") String city) {
+    return meteoService.fetch(city);
+}
+
+String answer = chat.prompt()
+    .user("Che tempo fa a Roma?")
+    .tools(this)
+    .call().content();
+```
+
+Spring AI / LangChain4j espongono lo schema della funzione all'LLM, lui restituisce
+JSON con i parametri, la libreria invoca il metodo, passa il risultato all'LLM.
+
+## Structured output
+
+Costringi l'LLM a restituire un POJO/record:
+
+```java
+record Sentiment(String label, double score) {}
+Sentiment s = chat.prompt().user(text).call().entity(Sentiment.class);
+```
+
+Sotto il cofano usa un converter (BeanOutputConverter) che istruisce l'LLM con uno
+schema JSON.
+
+## Chat memory
+
+Out-of-the-box per conversazioni multi-turn: `InMemoryChatMemory`, `JdbcChatMemory`,
+`Neo4jChatMemory`. Spring AI tiene la storia, la trunca quando supera il token budget.
+
+## Pricing e cache
+
+Ogni call costa token (input + output). Strategie:
+
+- Caching delle risposte per prompt identici (Redis, Caffeine).
+- "Prompt caching" lato provider (Anthropic, OpenAI gpt-4o).
+- Usare modelli piccoli (Haiku, gpt-4o-mini) per task semplici.

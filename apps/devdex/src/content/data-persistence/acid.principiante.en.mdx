@@ -1,0 +1,33 @@
+# A.C.I.D. properties
+
+ACID is the acronym for the four guarantees that a transactional DBMS offers:
+
+| Letter | Meaning |
+|---|---|
+| **A**tomicity   | A transaction is "all or nothing": either all operations succeed, or none. |
+| **C**onsistency | A transaction takes the DB from one valid state to another (constraints, FK, check). |
+| **I**solation   | Concurrent transactions do not see each other's work in flight. |
+| **D**urability  | Once committed, a transaction survives crashes. |
+
+## Example: bank transfer
+
+```sql
+BEGIN;
+  UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+  UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;
+```
+
+- **A**: if the second UPDATE fails, the first is rolled back too.
+- **C**: no row ever has a negative balance (if there's a `CHECK`).
+- **I**: another transaction sees neither "100 subtracted but not added" nor
+  the opposite.
+- **D**: after `COMMIT`, even if the JVM crashes, the transfer is permanent.
+
+## What is NOT ACID
+
+- Flat files / plain logs do not guarantee Atomicity.
+- Many NoSQL engines have eventual isolation or only "single document"
+  isolation.
+- A cache (basic Redis) does not provide Durability without AOF/RDB
+  configuration.

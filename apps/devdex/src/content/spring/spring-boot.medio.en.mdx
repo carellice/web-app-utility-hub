@@ -1,0 +1,74 @@
+# Spring Boot — Auto-configuration and DI
+
+## Auto-configuration
+
+Auto-configuration means: *"if I see X on the classpath and the user hasn't
+already defined Y, I configure Y for them"*.
+
+```java
+@AutoConfiguration
+@ConditionalOnClass(DataSource.class)
+@ConditionalOnMissingBean(DataSource.class)
+public class DataSourceAutoConfiguration { ... }
+```
+
+Auto-configs are loaded from
+`META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`
+(since Spring Boot 3; previously `spring.factories`).
+
+`@ConditionalOnXxx` is the key: `@ConditionalOnClass`,
+`@ConditionalOnMissingBean`, `@ConditionalOnProperty`,
+`@ConditionalOnWebApplication`, etc.
+
+## Dependency Injection
+
+```java
+@Service
+public class OrderService {
+    private final PriceRepo prices;
+
+    public OrderService(PriceRepo prices) {   // constructor injection (preferred)
+        this.prices = prices;
+    }
+}
+```
+
+Constructor > setter > field. Reasons:
+
+- Fields are `final` → immutable.
+- Unit tests: pass collaborators as parameters, no framework needed.
+- No NPE from a `@Autowired` field not populated in tests.
+
+## Scopes
+
+- `singleton` (default): one instance per ApplicationContext.
+- `prototype`: a new instance per injection.
+- `request`, `session`, `application` for web.
+
+## @Lazy
+
+Marks a bean to be instantiated **only on first use**, not at startup.
+
+```java
+@Component
+@Lazy
+public class HeavyService { ... }
+```
+
+Useful for:
+
+- Breaking dependency cycles.
+- Speeding up startup when a bean is rarely used.
+
+> ⚠️ `@Lazy` on a bean injected into a singleton creates a **proxy**. The first
+> call on the proxy will resolve the bean.
+
+## DispatcherServlet
+
+It is the Spring MVC front controller:
+
+1. Receives the HTTP request.
+2. Hands it off to a `HandlerMapping` to find the controller.
+3. Invokes the `HandlerAdapter`, which calls the `@RequestMapping` method.
+4. Converters (Jackson, etc.) serialize the response.
+5. ViewResolver / response body close the loop.

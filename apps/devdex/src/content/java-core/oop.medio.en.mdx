@@ -1,0 +1,153 @@
+# Intermediate OOP — Composition, SOLID, modern Java
+
+## Composition over inheritance
+
+Inheritance couples the subclass to the superclass *for life*. Modifying the
+parent risks breaking unknown children (**fragile base class problem**).
+Composition is almost always more flexible:
+
+```java
+// bad: inheriting to "pull down" functionality unrelated to the type
+public class TimestampedList<E> extends ArrayList<E> { ... }
+
+// good: the list is an inner collaborator, expose only what you need
+public class TimestampedList<E> {
+    private final List<E> delegate = new ArrayList<>();
+    private final Map<E, Instant> ts = new HashMap<>();
+
+    public void add(E e) {
+        delegate.add(e);
+        ts.put(e, Instant.now());
+    }
+    public Instant timestampOf(E e) { return ts.get(e); }
+}
+```
+
+## The 5 SOLID principles
+
+| Letter | Meaning | In one line |
+|---|---|---|
+| **S**RP | Single Responsibility | one class = one reason to change |
+| **O**CP | Open/Closed | open to extension, closed to modification |
+| **L**SP | Liskov Substitution | subtypes must honor the supertype contract |
+| **I**SP | Interface Segregation | prefer small, specific interfaces |
+| **D**IP | Dependency Inversion | depend on abstractions, not implementations |
+
+### LSP violation example
+
+```java
+public class Rectangle {
+    public void setWidth(int w) { ... }
+    public void setHeight(int h) { ... }
+}
+public class Square extends Rectangle {
+    @Override public void setWidth(int w)  { super.setWidth(w); super.setHeight(w); }
+    @Override public void setHeight(int h) { super.setWidth(h); super.setHeight(h); }
+}
+// Rectangle clients expect setWidth NOT to change height. Square violates LSP.
+```
+
+Fix: no inheritance between `Square` and `Rectangle`; both implement a
+`Shape` interface.
+
+## Modern Java: records, sealed, pattern matching
+
+### Records (Java 16+)
+
+Immutable data-carrier class:
+
+```java
+public record Point(int x, int y) {
+    public Point {
+        if (x < 0 || y < 0) throw new IllegalArgumentException();
+    }
+    public double distance(Point other) {
+        return Math.hypot(x - other.x, y - other.y);
+    }
+}
+```
+
+Equals, hashCode, toString, accessors (`x()`, `y()`), canonical constructor →
+automatic.
+
+### Sealed classes (Java 17+)
+
+Limit who can extend/implement:
+
+```java
+public sealed interface Shape permits Circle, Square, Triangle {}
+public record Circle(double r) implements Shape {}
+public record Square(double s) implements Shape {}
+public record Triangle(double a, double b, double c) implements Shape {}
+```
+
+Sealed types enable **exhaustive switches**:
+
+```java
+double area = switch (shape) {
+    case Circle c   -> Math.PI * c.r() * c.r();
+    case Square s   -> s.s() * s.s();
+    case Triangle t -> heron(t.a(), t.b(), t.c());
+    // no default: the compiler guarantees totality
+};
+```
+
+### Pattern matching for `instanceof`
+
+```java
+if (obj instanceof Account acc && acc.getBalance() > 1000) {
+    transfer(acc);
+}
+```
+
+No explicit cast, no null trap.
+
+## Equals & hashCode
+
+Contract:
+
+- Reflexive, symmetric, transitive, consistent.
+- `a.equals(b) ⇒ a.hashCode() == b.hashCode()`.
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (this == o) return true;
+    if (!(o instanceof Account other)) return false;
+    return Objects.equals(iban, other.iban);
+}
+
+@Override
+public int hashCode() { return Objects.hash(iban); }
+```
+
+> ⚠️ Trap: defining `equals` on a subset of fields and then mutating those
+> fields while the object is in a `HashMap`. The hash changes, the object
+> "disappears".
+
+## Builder pattern
+
+For constructors with many optional parameters:
+
+```java
+Order order = Order.builder()
+    .id("o-42")
+    .customer("Anna")
+    .item("Coffee", 2)
+    .item("Croissant", 1)
+    .discount(0.10)
+    .build();
+```
+
+Lombok `@Builder` or `RecordBuilder` (annotation processor) generate it for
+you.
+
+## Typical interview questions
+
+- *"Difference between inheritance and composition?"* — fragile base class,
+  coupling.
+- *"What is LSP, give a violation example."*
+- *"Differences between interface and abstract class after Java 8?"*
+- *"What are `record`s for?"* — immutable DTOs, no boilerplate.
+- *"Sealed classes: when would you use them?"* — closed hierarchies with
+  exhaustive switches.

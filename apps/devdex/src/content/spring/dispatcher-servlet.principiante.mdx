@@ -1,0 +1,95 @@
+# DispatcherServlet — Le basi
+
+Il `DispatcherServlet` è il **front controller** di Spring MVC. È un'unica Servlet
+registrata sul container (Tomcat, Jetty, Undertow) che intercetta tutte le HTTP
+request configurate (di default `/`) e le smista ai controller giusti.
+
+```text
+HTTP request → DispatcherServlet → HandlerMapping → Controller → ViewResolver / body → response
+```
+
+## Cosa fa, in sintesi
+
+1. Riceve la HTTP request (è una `HttpServlet`).
+2. Cerca un **HandlerMapping** che sappia indirizzare la URL a un handler.
+3. Usa un **HandlerAdapter** per invocare l'handler (di solito un metodo `@RequestMapping`).
+4. Converte gli argomenti del metodo (PathVariable, RequestBody, ...) usando i
+   `HttpMessageConverter`.
+5. Esegue il metodo, ottiene un valore di ritorno.
+6. Serializza la response (Jackson per JSON, view template per HTML).
+7. Gestisce eccezioni via `HandlerExceptionResolver` / `@ControllerAdvice`.
+
+## Auto-registrazione in Spring Boot
+
+In Spring Boot non devi configurare nulla: viene registrato automaticamente da
+`DispatcherServletAutoConfiguration`. Vedi il bean `dispatcherServlet`.
+
+## Mapping di default
+
+```text
+mapping: /
+```
+
+Significa "intercetta tutte le richieste". Configurabile:
+
+```yaml
+spring:
+  mvc:
+    servlet:
+      path: /api      # tutte le richieste sotto /api
+```
+
+## Controller tipico
+
+```java
+@RestController
+@RequestMapping("/orders")
+public class OrderController {
+
+    @GetMapping("/{id}")
+    public Order get(@PathVariable long id) { return svc.find(id); }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public Order create(@Valid @RequestBody NewOrder cmd) { return svc.place(cmd); }
+}
+```
+
+## Flusso semplificato
+
+```
+[Browser]
+   │ POST /orders
+   ▼
+DispatcherServlet
+   │ — chiede a RequestMappingHandlerMapping qual è il metodo per POST /orders
+   │ — chiede a RequestMappingHandlerAdapter di invocarlo
+   ▼
+OrderController.create(cmd)
+   │
+   ▼
+DispatcherServlet
+   │ — serializza Order in JSON con Jackson
+   │ — scrive HTTP 201
+   ▼
+[Browser]
+```
+
+## Filter vs Interceptor
+
+- **Filter** (Servlet API): vive a livello container, prima del DispatcherServlet.
+  Usato per security context, logging grezzo, gzip.
+- **Interceptor** (Spring): vive dentro il DispatcherServlet, ha accesso a
+  HandlerMapping e modello. Usato per metric per handler, headers comuni.
+
+```java
+@Component
+public class TimingFilter extends OncePerRequestFilter {
+    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res,
+                                    FilterChain chain) throws IOException, ServletException {
+        long t = System.nanoTime();
+        try { chain.doFilter(req, res); }
+        finally { log.info("{} {} took {} ns", req.getMethod(), req.getRequestURI(), System.nanoTime() - t); }
+    }
+}
+```

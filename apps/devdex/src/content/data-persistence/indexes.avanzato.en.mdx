@@ -1,0 +1,165 @@
+# DB Indexes — Internals and advanced optimization
+
+## Anatomy of a B-tree
+
+A B-tree (often a **B+tree** in practice) is balanced and high fan-out.
+Typical structure:
+
+```
+                    [root]
+                   /      \
+            [internal]   [internal]
+            /      \     /      \
+         [leaf]  [leaf] [leaf] [leaf]   ←  contain RID/PK + values
+            ←─────── linked list ───────→
+```
+
+Properties:
+
+- Height ≈ `log(N) / log(fanout)`. With fan-out 200 and 1B rows → height ~4.
+- Range scans traverse the linked leaves.
+- Inserts can cause node splits → write amplification.
+
+## Cluster index vs non-clustered
+
+- **InnoDB / SQL Server**: PK is the cluster index. Rows are physically
+  ordered by PK. Secondary indexes store the PK as a "pointer" to the row.
+- **Postgres**: no clustered index. Every index stores `(key, CTID)` where
+  CTID is a pointer to the physical block/offset (heap tuple).
+
+Implication (Postgres): a `HOT update` can leave stale CTIDs in secondaries
+until VACUUM cleans them up. For "covering" indexes, `INCLUDE` is a possible
+optimization that avoids heap lookups.
+
+## Fillfactor
+
+```sql
+CREATE INDEX ... WITH (fillfactor = 80);
+```
+
+Reserves 20% space in pages for future updates without splits. Trade-off:
+partially empty pages → larger index.
+
+## Index bloat and VACUUM
+
+In Postgres, updates create new tuples and mark the old ones "dead". The index
+keeps stale pointers until VACUUM cleans them. "Bloated" indexes = worse
+performance.
+
+```sql
+REINDEX INDEX CONCURRENTLY idx_users_email;
+```
+
+`CONCURRENTLY` does not block writes (Postgres 12+).
+
+## Multi-column index: column order
+
+Conscious choice:
+
+1. **Equality before range**: `(status, created_at)` for
+   `WHERE status = 'X' AND created_at > '...'`. Reverse is less efficient.
+2. **Decreasing selectivity**: most selective column first (when there's no
+   clear equality/range pattern).
+3. **Orderings**: if the index ends with the ordered column, `ORDER BY` is
+   free.
+
+## Index merge (MySQL)
+
+MySQL can combine two single-column indexes at runtime: better than nothing,
+worse than a composite index.
+
+```sql
+EXPLAIN SELECT * FROM users WHERE city = 'Rome' AND age = 30;
+-- type: index_merge
+```
+
+When you see it, consider creating the composite index.
+
+## Bitmap index (Oracle, partially Postgres)
+
+Postgres uses **bitmap index scan** even on B-trees to combine multiple
+predicates:
+
+1. Scan idx_a → bitmap of matching tuples.
+2. Scan idx_b → bitmap.
+3. AND/OR between bitmaps.
+4. Heap fetch on the final tuples.
+
+Advantage: great when each individual index returns few rows but the
+combination is efficient.
+
+## Index suggestions
+
+Tools:
+
+- **EXPLAIN ANALYZE**: see what the planner picks.
+- **pg_qualstats** (Postgres): predicate tracking to suggest indexes.
+- **Percona Toolkit** (MySQL): `pt-index-usage`.
+- **Database Engine Tuning Advisor** (SQL Server).
+- **EverSQL, dbForge**: commercial tools.
+
+## Write costs
+
+For an INSERT on a table with N indexes, the DB must:
+
+1. Insert the row into the heap.
+2. Insert the key into **every one** of the N indexes.
+3. Update statistics (occasionally).
+
+On write-heavy tables, every extra index costs. For historical (read-only)
+partitions, adding indexes after the load is a good strategy.
+
+## `UNIQUE` constraints ≠ application checks
+
+A DB-side `UNIQUE` constraint is atomic and race-free. An application
+"check then insert" has race conditions. Always declare the constraint:
+
+```sql
+ALTER TABLE users ADD CONSTRAINT email_unique UNIQUE (email);
+```
+
+And handle `UniqueViolationException` as a 409 Conflict.
+
+## Function-based + immutable
+
+For functional indexes, the function must be `IMMUTABLE`:
+
+```sql
+CREATE FUNCTION normalize(text) RETURNS text AS $$
+    SELECT lower(regexp_replace($1, '\s+', '', 'g'))
+$$ LANGUAGE SQL IMMUTABLE;
+
+CREATE INDEX idx_user_normalized ON users(normalize(email));
+```
+
+`IMMUTABLE` means: same input → same output, always. A required guarantee so
+that Postgres can reuse the value from the index.
+
+## Covering index in MySQL InnoDB
+
+All InnoDB secondary indexes **already include** the PK as the "pointer" to
+the row. So an index `(user_id, status)` is automatically covering for queries
+selecting `(user_id, status, id)`. Exploit this: pick a small PK (e.g.
+auto-increment INT/BIGINT), so all secondary indexes stay compact.
+
+## Indexes and GraphQL / list APIs
+
+Common pattern: list API with cursor pagination ordered by `created_at`.
+
+```sql
+CREATE INDEX idx_orders_created_at ON orders(created_at DESC);
+
+SELECT * FROM orders WHERE created_at < $cursor ORDER BY created_at DESC LIMIT 50;
+```
+
+The index supports both the WHERE and the ORDER BY in a single scan.
+
+## Typical interview questions
+
+- *"What is leftmost prefix?"*
+- *"B-tree vs hash index difference?"*
+- *"Cluster index vs secondary in InnoDB?"*
+- *"When is an index not used even if it exists?"* — functions, type mismatch,
+  low selectivity.
+- *"What is bloat and how is it managed?"* — VACUUM, REINDEX CONCURRENTLY.
+- *"Which indexes for JSON in Postgres?"* — GIN on JSONB.

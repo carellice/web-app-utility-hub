@@ -1,0 +1,22 @@
+# Swift su Android
+
+Sì, è possibile: Swift è open source e il compilatore (`swiftc`) supporta più
+architetture target. Combinato con l'**Android NDK** (Native Development Kit) può
+produrre librerie native (`.so`) eseguibili in app Android.
+
+```text
+swift sources  →  swiftc (Swift toolchain) →  libfoo.so  →  caricato da Android via JNI
+```
+
+## Perché farlo?
+
+- Riusare logica Swift già scritta per iOS in un'app Android (modello dati, parsing,
+  cripto…).
+- Curiosità / showcase.
+- Bridging multi-piattaforma con codice condiviso.
+
+## Perché non farlo (di solito)
+
+- Foundation completa **non c'è** su Android: alcune classi Apple sono assenti.
+- L'ecosistema strumenti (debug, profiler) su Android è inesistente.
+- Per app cross-platform reali oggi si usa Kotlin Multiplatform o Flutter, non Swift.

@@ -1,0 +1,126 @@
+# SDLC — Modern practices
+
+## Branching strategy
+
+### Trunk-Based Development
+
+- Everyone commits to `main` (or feature branches of a few hours).
+- Frequent merges, feature flags to hide incomplete work.
+- Pros: no "long-lived branch hell", fast flow.
+- Cons: requires solid CI, feature flags, autonomy.
+
+### GitFlow (historical)
+
+- `main`, `develop`, `feature/*`, `release/*`, `hotfix/*`.
+- Pros: clear for scheduled releases (monthly).
+- Cons: heavy for real CD, complex merges.
+
+For most SaaS products today: **trunk-based + feature flags**.
+
+## Code review
+
+- Small Pull Requests (< 400 net lines).
+- At least 1 reviewer, ideally 2.
+- Automate what adds no value: linter, formatter, security scan.
+
+Metaphorical takeaway: review is not "bug hunting" (tests do that), it is
+
+- knowledge sharing,
+- simplification,
+- consistency.
+
+## Testing pyramid
+
+```
+        /\
+       /UI\       (few, slow, fragile)
+      /----\
+     / Int. \    (some: smoke, contract)
+    /--------\
+   / Unit     \  (many, fast, deterministic)
+  ------------
+```
+
+Anti-pattern *ice cream cone*: few units, many E2E → every small bug takes
+hours of CI to catch.
+
+## Definition of Done
+
+A task is "done" when:
+
+- Code written + tests passing.
+- Code review approved.
+- Coverage does not drop.
+- Documentation updated (README, runbook, OpenAPI schema, ADR).
+- Stage deploy happened.
+- Adequate telemetry (metric/log/alert).
+
+## DORA metrics
+
+Google's 4 metrics for measuring a DevOps team's health:
+
+1. **Deployment frequency**: how often do you release?
+2. **Lead time for changes**: time from commit to prod.
+3. **Change failure rate**: % of deployments requiring a hotfix.
+4. **MTTR** (Mean Time To Recover): time to recover from a failure.
+
+"Elite" teams release multiple times a day, MTTR < 1h. Measured quarterly.
+
+## Documentation: the right level
+
+Documents worth having:
+
+- **README**: how to build/run.
+- **ADR** (Architecture Decision Records): why we picked X.
+- **OpenAPI / GraphQL schema**: API contract.
+- **Runbook**: how to operate during an incident (paging, restart, rollback).
+- **Onboarding**: a new teammate's first 7 days.
+
+Anti-pattern: design documents that age worse than the code.
+
+## Security in the cycle
+
+- **SAST** (Static Analysis Security Testing): SonarQube, Snyk, CodeQL.
+- **DAST** (Dynamic): scan live apps (OWASP ZAP).
+- **SCA** (Software Composition Analysis): vulnerabilities on dependencies
+  (Snyk, Dependabot).
+- **Secret scanning**: Gitleaks, GitHub secret scan.
+- **Container scanning**: Trivy, Grype.
+
+Integrate in CI: block PRs on high severity.
+
+## Architecture Decision Records (ADR)
+
+Short Markdown format:
+
+```markdown
+# ADR-0007: Adopt Kafka instead of RabbitMQ
+
+## Context
+[What we are deciding and why now]
+
+## Decision
+[What we decided]
+
+## Consequences
+[Pros, cons, costs, required knowledge]
+```
+
+Versioned in the repo. When 18 months later someone asks "why Kafka?", the ADR
+answers.
+
+## Roadmap and Now/Next/Later
+
+- **Now**: in the current sprint.
+- **Next**: next 1-2 sprints.
+- **Later**: ideas in the 1-3 month range.
+- **Never**: parking lot.
+
+Transparent to stakeholders, avoids "everything right now" requests.
+
+## Release management
+
+- **Semantic versioning**: MAJOR.MINOR.PATCH.
+- **Changelog**: what changed across recent versions (Keep a Changelog).
+- **Git tag** + automatic release notes (release-please, semantic-release).
+- **Compatibility**: deprecations with two releases of notice.

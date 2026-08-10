@@ -1,0 +1,72 @@
+# ForkJoinPool — The basics
+
+A `ForkJoinPool` is a special thread pool optimized for tasks that
+recursively split themselves (**divide-and-conquer**). Introduced in Java 7,
+it is the backbone of:
+
+- `parallelStream()` and `Stream.parallel()`.
+- `CompletableFuture` (default commonPool).
+- `java.util.concurrent.RecursiveTask` / `RecursiveAction`.
+
+## Distinctive features
+
+- Each worker has its own local **deque**.
+- When it finishes its tasks, it **steals** work from other workers' deques
+  (**work-stealing**).
+- Submitting child tasks (`fork()`) is almost free: they are pushed into the
+  local deque.
+
+## Hello world: recursive sum
+
+```java
+public class SumTask extends RecursiveTask<Long> {
+    private final int[] arr;
+    private final int lo, hi;
+    private static final int THRESHOLD = 10_000;
+
+    public SumTask(int[] arr, int lo, int hi) {
+        this.arr = arr; this.lo = lo; this.hi = hi;
+    }
+
+    @Override
+    protected Long compute() {
+        if (hi - lo <= THRESHOLD) {
+            long s = 0;
+            for (int i = lo; i < hi; i++) s += arr[i];
+            return s;
+        }
+        int mid = (lo + hi) >>> 1;
+        SumTask left  = new SumTask(arr, lo, mid);
+        SumTask right = new SumTask(arr, mid, hi);
+        left.fork();              // push into the local deque
+        long r = right.compute(); // compute in-thread
+        long l = left.join();     // wait for the fork
+        return l + r;
+    }
+}
+
+// usage:
+long total = ForkJoinPool.commonPool().invoke(new SumTask(arr, 0, arr.length));
+```
+
+## commonPool
+
+`ForkJoinPool.commonPool()` is a static pool shared across the whole JVM.
+Default worker count: `Runtime.getRuntime().availableProcessors() - 1`.
+
+```java
+System.out.println(ForkJoinPool.commonPool().getParallelism());
+```
+
+## When to use it
+
+- **CPU-bound** divisible work (array sum, sorts, matrix sums, parallel
+  searches in tries/graphs).
+- Parallel streams when criteria are met (large dataset, pure operation).
+
+## When NOT to use it
+
+- **Blocking** tasks (I/O, DB, network): they would occupy workers that
+  become useless, starving the others.
+- Operations that need a strict order.
+- Tiny datasets: fork/join overhead outweighs the gain.

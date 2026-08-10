@@ -1,0 +1,39 @@
+# Quarkus
+
+Quarkus è un framework Java moderno (Red Hat) progettato per essere **"supersonic,
+subatomic"**: startup velocissimo, footprint piccolo, ottimo per container e
+serverless.
+
+```bash
+mvn io.quarkus.platform:quarkus-maven-plugin:create
+mvn quarkus:dev
+```
+
+```java
+@Path("/hello")
+public class HelloResource {
+    @GET
+    @Produces(MediaType.TEXT_PLAIN)
+    public String hello() {
+        return "Hello from Quarkus";
+    }
+}
+```
+
+## Cosa lo distingue da Spring Boot
+
+- **Build-time processing**: invece di scansionare classpath e creare proxy a runtime,
+  Quarkus fa quasi tutto durante la compilazione (estensioni che producono bytecode).
+- **Native image** con GraalVM: l'app diventa un binario nativo.
+- **Live coding**: `quarkus:dev` ricompila e riavvia in millisecondi.
+
+## Estensioni
+
+Aggiungere una "feature" è un `quarkus extension add` (REST, JPA, Kafka, OIDC, ecc.).
+Ogni estensione conosce il proprio metadata e contribuisce al build-time processing.
+
+## Dove brilla
+
+- Funzioni serverless (cold start in 50 ms).
+- Container Kubernetes con poca RAM.
+- Microservizi cloud-native dove startup veloce conta (autoscaling).

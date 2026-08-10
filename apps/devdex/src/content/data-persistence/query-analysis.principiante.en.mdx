@@ -1,0 +1,98 @@
+# Analyzing complex queries — The basics
+
+Understanding why a query is slow is a key skill. The first tool is
+**`EXPLAIN`**: ask the DB to show you the **execution plan** instead of running
+it (or use `EXPLAIN ANALYZE` to execute and show real timings).
+
+## Postgres example
+
+```sql
+EXPLAIN ANALYZE
+SELECT o.id, o.total
+FROM orders o
+WHERE o.user_id = 42 AND o.status = 'PAID';
+```
+
+Output (simplified):
+
+```
+Index Scan using idx_orders_user_status on orders o
+  (cost=0.42..8.46 rows=1 width=16)
+  (actual time=0.041..0.045 rows=3 loops=1)
+  Index Cond: (user_id = 42 AND status = 'PAID')
+Planning Time: 0.250 ms
+Execution Time: 0.072 ms
+```
+
+What to read:
+
+- **Index Scan / Seq Scan / Bitmap Scan**: how it accesses data.
+- **rows**: estimated. Far from "actual rows" → stale stats or wrong
+  cardinality estimation.
+- **cost**: planner estimate. Arbitrary numbers, but comparable between plans.
+- **actual time**: real data.
+
+## Common scan types
+
+- **Seq Scan**: scans the whole table. OK for small tables or when the
+  predicate matches most rows.
+- **Index Scan**: scans the index and then fetches rows from the heap.
+- **Index Only Scan**: fully satisfied by the index (covering).
+- **Bitmap Scan**: scans N indexes → bitmap → heap fetch. Used when there are
+  multiple predicates with different indexes.
+
+## "Heavy" operations
+
+- **Hash Join / Nested Loop / Merge Join**: how two tables are joined.
+- **Sort**: ORDER BY without a supporting index.
+- **GroupAggregate / HashAggregate**: GROUP BY.
+
+## Simple cases to fix
+
+### Forgot the index
+
+```sql
+EXPLAIN SELECT * FROM users WHERE email = 'a@b.it';
+-- Seq Scan on users → missing index on email
+CREATE INDEX idx_users_email ON users(email);
+```
+
+### Bad pagination
+
+```sql
+SELECT * FROM orders ORDER BY id LIMIT 50 OFFSET 100000;
+-- reads 100050 rows to discard 100000
+```
+
+Fix: **keyset / cursor pagination**:
+
+```sql
+SELECT * FROM orders WHERE id > ? ORDER BY id LIMIT 50;
+```
+
+### LIKE with leading wildcard
+
+```sql
+SELECT * FROM users WHERE email LIKE '%@example.com';
+-- Seq Scan: no B-tree can help
+```
+
+Fixes: trigram index (`pg_trgm`), full-text, denormalize the domain.
+
+## MySQL
+
+```sql
+EXPLAIN SELECT ...;
+```
+
+Output: `type` (`ALL`, `index`, `range`, `ref`, `eq_ref`, `const`), `key`
+(chosen index), `rows` (row estimate), `Extra`.
+
+`EXPLAIN FORMAT=JSON` gives more detail; `EXPLAIN ANALYZE` (MySQL 8+) executes
+and shows timings.
+
+## Graphical tools
+
+- **Postgres**: `pgAdmin` Explain, `https://explain.dalibo.com`.
+- **MySQL**: MySQL Workbench Visual Explain.
+- **VS Code**: SQL extensions with inline explain.

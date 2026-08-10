@@ -1,0 +1,42 @@
+# Microservices — The basics
+
+A **microservice** system is a collection of services:
+
+- **Small** and focused on a business capability.
+- **Autonomous**: each has its own code, its own DB, its own deploy.
+- They communicate over the network: HTTP/REST, gRPC, message queues.
+
+```text
+[ Web ] → [ Auth ] → [ Orders ] → [ Payments ]
+                           ↘  [ Notifications ]
+```
+
+## Why do it?
+
+- **Independent scalability**: the "search" service scales differently from
+  "checkout".
+- **Team independence**: a team owns a service end-to-end (Conway's law).
+- **Heterogeneous tech**: use the right tool per problem.
+- **Frequent deploys**: releasing one does not block the others.
+
+## Why NOT (right away)
+
+- Operational complexity: monitoring, tracing, deploy, networking.
+- Distributed transactions (sagas, eventual consistency).
+- Latency: every call is over the network.
+- Infrastructure costs.
+
+Sam Newman's rule: **"Don't start with microservices"**. Start with a modular
+monolith, and split only when you have concrete pain.
+
+## Communication
+
+- **Synchronous** (REST/gRPC): simple, but couples availability.
+- **Asynchronous** (Kafka, RabbitMQ, SQS): more resilient, but more complex
+  (idempotency, ordering).
+
+## Microservices ≠ "many small services"
+
+If 5 services always deploy together and share a DB → you have a **distributed
+monolith**: worse than a monolith, because you pay network costs without the
+independence benefits.

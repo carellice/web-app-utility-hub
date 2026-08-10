@@ -1,0 +1,35 @@
+# Varargs (`String...`)
+
+**Varargs** is syntax that lets you pass a variable number of arguments to a
+method:
+
+```java
+public static String join(String sep, String... parts) {
+    return String.join(sep, parts);
+}
+
+// All these are valid:
+join(",");                          // 0 elements
+join(",", "a");                     // 1 element
+join(",", "a", "b", "c");           // 3 elements
+join(",", new String[]{"a", "b"});  // an explicit array also works
+```
+
+## Basic rules
+
+- Varargs must come **last** in the method signature.
+- A method can have **only one** varargs parameter.
+- Internally Java treats them as an array, so you can use `parts.length`,
+  `parts[0]`, iterate with a `for`, etc.
+
+```java
+public static void log(String msg, Object... args) {
+    System.out.printf(msg + "%n", args);
+}
+log("User %s has %d credits", "Anna", 12);
+```
+
+## `printf` uses them too
+
+`System.out.printf`, `String.format`, `Arrays.asList` are everyday examples
+of JDK varargs methods.

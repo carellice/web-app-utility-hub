@@ -1,0 +1,57 @@
+# SQL vs NoSQL
+
+## SQL (RDBMS)
+
+- **Rigid schema**: tables, columns, types, constraints.
+- **Relational**: primary/foreign keys, JOINs.
+- **ACID transactions**.
+- Examples: PostgreSQL, MySQL, MariaDB, DB2, Oracle, SQL Server.
+
+When: structured domain, referential integrity critical, complex reporting,
+multi-row transactions.
+
+## NoSQL
+
+Not a language: it is a **set of alternative paradigms**.
+
+| Family | Examples | Model |
+|---|---|---|
+| Document | MongoDB, Couchbase | JSON-like nested documents |
+| Key-Value | Redis, DynamoDB | key → value map (even complex) |
+| Wide-Column | Cassandra, ScyllaDB, HBase | rows with dynamic columns |
+| Graph | Neo4j, ArangoDB | nodes + edges |
+| Time-series | InfluxDB, TimescaleDB | timestamped observations |
+
+When: data without a fixed schema, high-throughput writes, horizontal
+scalability, natural document model (e.g. complex user profiles).
+
+## Quick comparison
+
+| Aspect | SQL | NoSQL |
+|---|---|---|
+| Schema | rigid (DDL) | flexible / on-read |
+| Transactions | full ACID | often single-document |
+| Scaling | vertical, replica/sharding | horizontal by design |
+| Query | standardized SQL | per-DB API |
+| JOIN | native | often absent or expensive |
+
+## Example
+
+SQL:
+
+```sql
+SELECT u.name, o.total
+FROM users u JOIN orders o ON o.user_id = u.id
+WHERE u.country = 'IT';
+```
+
+MongoDB (same info, different model):
+
+```js
+db.users.find({ country: "IT" })
+        .toArray()
+        .flatMap(u => db.orders.find({ userId: u._id }).toArray()
+                                .map(o => ({ name: u.name, total: o.total })));
+```
+
+Or you denormalize `orders` as an array inside `users`.

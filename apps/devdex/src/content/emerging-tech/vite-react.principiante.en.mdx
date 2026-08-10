@@ -1,0 +1,93 @@
+# Vite + React
+
+**Vite** is a modern build tool for web apps, written in Go/Rust/JS. It was
+created by Evan You (Vue author) and quickly conquered the React ecosystem too,
+replacing Create React App (deprecated in 2023).
+
+```bash
+npm create vite@latest my-app -- --template react
+cd my-app
+npm install
+npm run dev   # server in 200ms
+```
+
+## What sets it apart
+
+1. **Dev server based on native ESM**: the browser loads ES modules directly,
+   without bundling. No wait: first render happens in hundreds of ms.
+2. **Instant HMR (Hot Module Replacement)**: change a file, the page updates
+   without reloading and without losing state.
+3. **Production build with Rollup**: optimized, aggressive tree-shaking.
+4. **Plugin ecosystem**: React, Vue, Svelte, MDX, PWA, etc.
+
+## Typical structure
+
+```
+my-app/
+├── index.html               ← HTML entry point (lives at root, not public)
+├── package.json
+├── vite.config.js
+└── src/
+    ├── main.jsx             ← React entry point
+    ├── App.jsx
+    └── components/...
+```
+
+`index.html` references `src/main.jsx` directly:
+
+```html
+<script type="module" src="/src/main.jsx"></script>
+```
+
+## Minimal configuration
+
+```js
+// vite.config.js
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+});
+```
+
+The React plugin enables JSX, Fast Refresh, and the automatic JSX runtime.
+
+## Scripts
+
+```json
+{
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
+}
+```
+
+- `dev`: dev server at `http://localhost:5173`.
+- `build`: optimized bundle in `dist/`.
+- `preview`: serves `dist/` to test the build.
+
+## Environment variables
+
+```ts
+// .env.local
+VITE_API_URL=http://localhost:8080
+
+// usage
+const url = import.meta.env.VITE_API_URL;
+```
+
+Only variables prefixed with `VITE_` are exposed to client code.
+
+## Assets
+
+```jsx
+import logoUrl from './logo.svg';
+import logoComponent from './logo.svg?react';  // as a component (with plugin)
+
+<img src={logoUrl} />
+```
+
+Files in `public/` are served `as-is`. Files in `src/` go through the bundler.

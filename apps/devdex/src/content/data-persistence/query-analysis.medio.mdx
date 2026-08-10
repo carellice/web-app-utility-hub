@@ -1,0 +1,158 @@
+# Analisi query — Pattern intermedi
+
+## Stime sbagliate
+
+Il planner stima le righe risultato basandosi sulle statistiche
+(`pg_stats`, `mysql.column_stats`). Se le stime sono lontane dai dati reali, sceglie
+il piano sbagliato.
+
+```sql
+ANALYZE orders;            -- Postgres: aggiorna statistiche
+ANALYZE TABLE orders;       -- MySQL
+```
+
+Postgres ha **autovacuum** che lancia ANALYZE periodicamente. Se sospetti stime
+errate, forzare ANALYZE e ri-eseguire EXPLAIN è il primo passo.
+
+## CREATE STATISTICS multivariate (Postgres)
+
+```sql
+CREATE STATISTICS s_user_status (dependencies, ndistinct)
+ON user_id, status FROM orders;
+ANALYZE orders;
+```
+
+Per colonne correlate: senza, il planner assume **indipendenza statistica** e stima
+prodotto delle selettività → grossolane sottostime.
+
+## Join pesanti
+
+```sql
+SELECT * FROM users u JOIN orders o ON o.user_id = u.id WHERE u.country = 'IT';
+```
+
+Strategie del planner:
+
+- **Nested loop**: per ogni `u`, cerca con index su `o.user_id`. Ottimo se pochi `u`.
+- **Hash join**: build hash su `u`, scan su `o`. Ottimo per tante righe.
+- **Merge join**: entrambi ordinati. Raro nei moderni.
+
+Forzare? In Postgres non ufficialmente. Si influenza con `enable_nestloop = off`
+**solo a livello sessione di test**.
+
+## N+1: il killer di JPA
+
+```java
+for (User u : repo.findAll()) {
+    System.out.println(u.getOrders().size());
+}
+```
+
+Logs Hibernate:
+
+```
+SELECT * FROM users
+SELECT * FROM orders WHERE user_id = 1
+SELECT * FROM orders WHERE user_id = 2
+...
+```
+
+Fix con `JOIN FETCH`, `@EntityGraph` o batch fetching:
+
+```yaml
+spring.jpa.properties.hibernate.default_batch_fetch_size: 50
+```
+
+Hibernate combina `IN (1, 2, ..., 50)`. Buon compromesso.
+
+## Pagination + sort
+
+Per stabilità, sempre includere una colonna tie-breaker:
+
+```sql
+SELECT * FROM events ORDER BY occurred_at DESC, id DESC LIMIT 50 OFFSET ?;
+```
+
+Senza tie-breaker, gli eventi con stesso `occurred_at` possono saltare pagine.
+
+## Query con OR
+
+```sql
+SELECT * FROM users WHERE email = ? OR phone = ?;
+```
+
+Senza un indice combinato, due Seq Scan (o, meglio, Bitmap OR di 2 indici).
+Alternativa: UNION ALL su due query, ognuna che usa il suo indice:
+
+```sql
+SELECT * FROM users WHERE email = ?
+UNION ALL
+SELECT * FROM users WHERE phone = ? AND email IS DISTINCT FROM ?;
+```
+
+## Subquery vs JOIN
+
+```sql
+-- subquery (correlata)
+SELECT u.* FROM users u
+WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id AND o.status = 'PAID');
+
+-- semi-join (Postgres optimizer ottimizza spesso EXISTS in semi-join)
+```
+
+In genere `EXISTS` ≥ `IN` (cortocircuita), > `JOIN` con DISTINCT (che fa lavoro extra).
+
+## Subquery scalari pesanti
+
+```sql
+SELECT u.*, (SELECT COUNT(*) FROM orders WHERE user_id = u.id) AS n_orders
+FROM users u;
+```
+
+Esecuzione subquery per ogni riga. Soluzione: JOIN con aggregazione:
+
+```sql
+SELECT u.*, COALESCE(o.n, 0) AS n_orders
+FROM users u
+LEFT JOIN (SELECT user_id, COUNT(*) n FROM orders GROUP BY user_id) o
+   ON o.user_id = u.id;
+```
+
+## CTE: occhio con Postgres ≤ 11
+
+Pre-Postgres 12, le **CTE erano "optimization fences"**: il planner non poteva fare
+push-down predicate dentro. Dal 12 sono inline-able. Se sei su versioni vecchie,
+sostituire una CTE con subquery può migliorare il piano.
+
+## ORDER BY + LIMIT senza indice
+
+```sql
+SELECT * FROM events ORDER BY occurred_at DESC LIMIT 50;
+```
+
+Senza indice: full sort poi LIMIT. Con indice `(occurred_at DESC)`: index scan
+backward, top-N senza sort.
+
+## EXPLAIN (BUFFERS) Postgres
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS) SELECT ...;
+```
+
+Mostra blocchi letti da memoria vs disco. Mass `read=`  → I/O reale. `hit=` →
+buffer pool.
+
+## Pattern: read-model materializzati
+
+Per query analitiche pesanti, costruire una **materialized view**:
+
+```sql
+CREATE MATERIALIZED VIEW orders_daily AS
+SELECT date_trunc('day', created_at) AS day, count(*) AS n, sum(total) AS total
+FROM orders GROUP BY 1;
+CREATE INDEX ON orders_daily(day);
+
+REFRESH MATERIALIZED VIEW CONCURRENTLY orders_daily;
+```
+
+Tradeoff: dati "freschi" con lag, ma read O(1).

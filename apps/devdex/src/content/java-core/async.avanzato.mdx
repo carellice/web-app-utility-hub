@@ -1,0 +1,63 @@
+# Async avanzato: ForkJoinPool, callback hell, Virtual Threads
+
+## ForkJoinPool
+
+Pool ottimizzato per task **divide-and-conquer**: ogni thread ha la sua deque, fa
+**work-stealing** quando finisce. È il backbone di:
+
+- Stream paralleli.
+- `CompletableFuture` (commonPool di default).
+- `parallelStream` su ogni collezione.
+
+> ⚠️ Il commonPool è **shared**: se ci submitti task bloccanti (I/O, DB) "intasi" tutta
+> la JVM. Usa pool dedicati.
+
+`ManagedBlocker` permette di indicare al pool che stai per bloccare, così può creare
+thread aggiuntivi temporanei (vedi `ForkJoinPool.managedBlock`).
+
+## Callback hell vs CompletableFuture
+
+I callback puri (Java 1.x style: listener) generano "piramidi della morte". I
+CompletableFuture *pinaano* la composizione, ma se la pipeline diventa lunga il debug è
+ostico (stacktrace senza la chiamata originale).
+
+Trucchi:
+
+- Dare nomi ai metodi intermedi (`thenApply(this::parse)` invece di lambda anonime).
+- Usare `CompletableFuture.completedFuture(...)` nei test.
+- Aggiungere log con `whenComplete((v, ex) -> ...)` *senza* trasformare la pipeline.
+
+## Reattivo (Reactor / RxJava)
+
+`Mono<T>` e `Flux<T>` sono il modello reattivo: aggiungono **backpressure** (il
+consumer detta il ritmo al producer), operatori di gestione dello stream completi
+(`window`, `buffer`, `merge`...). Vedi `WebClient` in Spring 6+.
+
+## Virtual Threads (Java 21+)
+
+Project Loom introduce **virtual threads**: thread leggerissimi (KB invece di MB),
+gestiti dalla JVM e parcheggiati quando bloccati su I/O.
+
+```java
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    IntStream.range(0, 10_000).forEach(i ->
+        executor.submit(() -> {
+            String html = http.get(url);   // bloccante, ma non blocca un carrier
+            return parse(html);
+        })
+    );
+}
+```
+
+Per molti casi d'uso, **virtual threads rendono inutile il modello reattivo**: il
+codice resta sincrono ma scala come se fosse async.
+
+> 💡 Attenzione a `synchronized` con virtual thread: prima di Java 24 "pinava" il
+> carrier thread (workaround: usare `ReentrantLock`). Dal 24 il pinning è risolto.
+
+## Cancellazione
+
+`CompletableFuture.cancel(true)` *non* interrompe il task se è già in esecuzione: marca
+solo la future come completata eccezionalmente. Per task interrompibili veri devi
+gestire `Thread.interrupted()` o usare `Future` da un `ExecutorService` con task
+cooperativi.

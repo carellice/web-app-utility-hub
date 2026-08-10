@@ -1,0 +1,75 @@
+# API style — Chicche e ottimizzazioni
+
+## HTTP/2, HTTP/3 e ciò che cambia per REST
+
+HTTP/1.1 apre N connessioni per parallelizzare → costi alti (TLS handshake). HTTP/2:
+multiplexing su una sola connessione TCP. HTTP/3: lo stesso su QUIC (UDP), elimina
+"head-of-line blocking" a livello TCP.
+
+Effetti pratici:
+
+- `keep-alive` agressivo: pool di **1 connessione per host** può bastare.
+- Server push (HTTP/2) era usato per CSS/JS, in pratica obsolete (browser disabilitati).
+- gRPC funziona perché richiede HTTP/2.
+
+## Idempotenza in dettaglio
+
+Verbo idempotente = ripetere N volte ha lo stesso effetto di una volta. Importante per:
+
+- Retry sicuri (proxy, mobile su rete instabile).
+- Resilienza distribuita (vedi outbox pattern).
+
+Trappola: un POST con `Idempotency-Key` è davvero idempotente solo se:
+
+1. Il server salva *transactionalmente* `(key, response)` con il risultato.
+2. La risposta cached è restituita con esattamente lo stesso status.
+3. La chiave è valida per un tempo finito (TTL) per evitare growth illimitato.
+
+## Caching: ETag e If-None-Match
+
+```http
+GET /users/42 HTTP/1.1
+If-None-Match: "v123"
+
+HTTP/1.1 304 Not Modified
+```
+
+Risparmi la serializzazione del body. Devi però computare l'ETag (versione, hash). Pair
+con CDN per cache push.
+
+## Backpressure in gRPC streaming
+
+Server streaming può saturare il client se non controlli il flow. gRPC usa il flow
+control HTTP/2 (window), ma sopra di esso conviene avere **batch + ack** applicativo.
+
+## SOAP: WS-Reliable Messaging
+
+SOAP storicamente offriva "at-least-once" / "exactly-once" delivery a livello protocollo.
+In REST/gRPC questa garanzia sale al livello applicativo (broker + idempotency).
+
+## API gateway pattern
+
+Per microservizi, un gateway (Kong, Apigee, Spring Cloud Gateway) gestisce:
+
+- Auth/JWT.
+- Rate limiting.
+- Routing.
+- Aggregazione (BFF).
+- Translation (es. REST esterno → gRPC interno).
+
+> 💡 Non infilare logica di business nel gateway: diventa un monolite mascherato.
+
+## Anti-pattern comuni
+
+- **Tunneling**: un endpoint `POST /api/do` con `{ action: "createOrder" }`. Distrugge
+  semantica HTTP e caching.
+- **PUT che fa partial update**: usa PATCH (RFC 7396 per JSON merge patch o RFC 6902
+  per JSON patch).
+- **Status 200 con `error` nel body**: rompe ogni client/monitoring che si aspetta lo
+  status code corretto.
+- **Esporre ID interni del DB**: trapela info, rischio enumeration. Usa UUID o hashid.
+
+## OpenAPI (Swagger): contratto first
+
+Disegna prima il contratto (`openapi.yaml`), genera client/server. Spring `springdoc-openapi`
+estrae OpenAPI dai controller, ma la qualità migliore si ottiene scrivendolo a mano.

@@ -1,0 +1,50 @@
+# Building an immutable class
+
+The classic recipe (Bloch's rules, *Effective Java*):
+
+1. The class is `final` (or all constructors are private with factories).
+2. All fields are `private final`.
+3. No setters, no methods that mutate state.
+4. **Defensive copy** on input and output for fields referring to mutable
+   objects.
+
+```java
+public final class Period {
+    private final Date start;
+    private final Date end;
+
+    public Period(Date start, Date end) {
+        if (start.after(end)) throw new IllegalArgumentException();
+        // defensive copy: the caller cannot change our state afterwards
+        this.start = new Date(start.getTime());
+        this.end   = new Date(end.getTime());
+    }
+
+    public Date getStart() {
+        return new Date(start.getTime());  // never expose the internal reference
+    }
+}
+```
+
+## Record (Java 16+)
+
+`record`s are immutable by design and automatically generate constructor,
+accessors, `equals`, `hashCode`, `toString`:
+
+```java
+public record Period(LocalDate start, LocalDate end) {
+    public Period {
+        if (start.isAfter(end)) throw new IllegalArgumentException();
+    }
+}
+```
+
+> ⚠️ A record can still "contain" mutable objects.
+> `record Cart(List<Item> items)` is *shallow immutable*: the inner list is
+> the same instance that was passed in.
+
+## Immutable collections
+
+- `List.of(...)`, `Set.of(...)`, `Map.of(...)` → truly immutable.
+- `Collections.unmodifiableList(list)` → read-only wrapper, but if someone
+  keeps the reference to the original list, they can still modify it.

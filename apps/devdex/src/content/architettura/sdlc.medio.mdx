@@ -1,0 +1,124 @@
+# SDLC — Pratiche moderne
+
+## Branching strategy
+
+### Trunk-Based Development
+
+- Tutti committano su `main` (o feature branch di poche ore).
+- Merge frequente, feature flag per nascondere lavoro incompleto.
+- Pro: niente "long-lived branch hell", flusso veloce.
+- Contro: richiede CI solida, feature flag, autonomia.
+
+### GitFlow (storico)
+
+- `main`, `develop`, `feature/*`, `release/*`, `hotfix/*`.
+- Pro: chiaro per release pianificate (mensili).
+- Contro: pesante per CD reali, merge complessi.
+
+Per la maggior parte dei prodotti SaaS oggi: **trunk-based + feature flag**.
+
+## Code review
+
+- Pull Request piccole (< 400 righe nette).
+- Almeno 1 reviewer, idealmente 2.
+- Automatizzare quello che non aggiunge valore: linter, formatter, security scan.
+
+Mining metaforico: la review non è "ricerca bug" (lo fanno i test), è
+- knowledge sharing,
+- semplificazione,
+- consistency.
+
+## Testing pyramid
+
+```
+        /\
+       /UI\       (pochi, lenti, fragili)
+      /----\
+     / Int. \    (qualcuno: smoke, contract)
+    /--------\
+   / Unit     \  (tanti, veloci, deterministici)
+  ------------
+```
+
+Anti-pattern *ice cream cone*: pochi unit, tanti E2E → ogni piccolo bug richiede ore
+di CI per essere catturato.
+
+## Definition of Done
+
+Un task è "fatto" quando:
+
+- Codice scritto + test passanti.
+- Code review approvata.
+- Coverage non scende.
+- Documentazione aggiornata (README, runbook, schema OpenAPI, ADR).
+- Deploy in stage avvenuto.
+- Telemetria adatta (metric/log/alert).
+
+## DORA metrics
+
+Le 4 metriche di Google per misurare la salute di un team DevOps:
+
+1. **Deployment frequency**: quanto spesso rilasci?
+2. **Lead time for changes**: tempo da commit a prod.
+3. **Change failure rate**: % deployment che richiede hotfix.
+4. **MTTR** (Mean Time To Recover): tempo per ripristinare da un guasto.
+
+Team "Elite" rilasciano più volte al giorno, MTTR < 1h. Misurate trimestralmente.
+
+## Documentazione: il livello giusto
+
+Documenti che valgono la pena:
+
+- **README**: come buildare/runnare.
+- **ADR** (Architecture Decision Records): perché abbiamo scelto X.
+- **OpenAPI / GraphQL schema**: contratto delle API.
+- **Runbook**: come operare in incident (paging, restart, rollback).
+- **Onboarding**: i primi 7 giorni di un nuovo collega.
+
+Anti-pattern: documenti di design che invecchiano peggio del codice.
+
+## Security nel ciclo
+
+- **SAST** (Static Analysis Security Testing): SonarQube, Snyk, CodeQL.
+- **DAST** (Dynamic): scan di app live (OWASP ZAP).
+- **SCA** (Software Composition Analysis): vulnerability su dipendenze (Snyk, Dependabot).
+- **Secret scanning**: Gitleaks, GitHub secret scan.
+- **Container scanning**: Trivy, Grype.
+
+Da integrare in CI: blocca PR su severity alta.
+
+## Architecture Decision Records (ADR)
+
+Formato Markdown breve:
+
+```markdown
+# ADR-0007: Adottare Kafka invece di RabbitMQ
+
+## Contesto
+[Cosa stiamo decidendo e perché ora]
+
+## Decisione
+[Cosa abbiamo deciso]
+
+## Conseguenze
+[Pro, contro, costi, conoscenze richieste]
+```
+
+Versionati nel repo. Quando 18 mesi dopo qualcuno chiede "perché Kafka?", l'ADR
+risponde.
+
+## Roadmap e Now/Next/Later
+
+- **Now**: in sprint corrente.
+- **Next**: prossimi 1-2 sprint.
+- **Later**: idee a 1-3 mesi.
+- **Never**: parking lot.
+
+Trasparente verso stakeholder, evita richieste "subito tutto".
+
+## Release management
+
+- **Versioning semantico**: MAJOR.MINOR.PATCH.
+- **Changelog**: cosa è cambiato dalle ultime versioni (Keep a Changelog).
+- **Tag git** + release notes automatiche (release-please, semantic-release).
+- **Compatibilità**: deprecazioni con due release di preavviso.

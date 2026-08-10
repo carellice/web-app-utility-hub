@@ -1,0 +1,143 @@
+# JDBC vs Hibernate — Pattern intermedi
+
+## Hibernate Session / EntityManager
+
+- `EntityManager` (JPA) = `Session` (Hibernate).
+- Vive il tempo di una transazione (di default in Spring).
+- Mantiene una **Persistence Context**: una cache delle entity managed (first-level cache).
+
+```java
+@Transactional
+public void rename(long id, String newName) {
+    User u = em.find(User.class, id);   // SELECT
+    u.setName(newName);                  // niente UPDATE qui
+    // a fine tx: dirty check → UPDATE solo se cambiato
+}
+```
+
+## Dirty checking
+
+Hibernate confronta lo stato attuale con lo "snapshot" iniziale e genera l'UPDATE
+automaticamente. Niente `update()` esplicito. Magia comoda, ma:
+
+- Su entity grosse, l'UPDATE include **tutti** i campi (puoi configurare
+  `@DynamicUpdate` per fare solo i cambiati).
+- Sincronizzazione con DB avviene al flush, che a sua volta è a fine tx o prima di una
+  query (per "auto-flush").
+
+## Lazy loading
+
+```java
+@Entity
+class User {
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
+    List<Order> orders;
+}
+```
+
+`user.getOrders()` genera la query SOLO al primo accesso. Trappole:
+
+- **LazyInitializationException**: se la sessione è chiusa.
+- **N+1 query**: ciclo che accede al collection lazy → una query per parent + N per i child.
+
+Soluzioni N+1:
+
+```java
+@EntityGraph(attributePaths = "orders")
+List<User> findAll();
+```
+
+Oppure JPQL `JOIN FETCH`:
+
+```java
+SELECT u FROM User u LEFT JOIN FETCH u.orders WHERE u.active = true
+```
+
+## Cascade
+
+```java
+@OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+List<Order> orders;
+```
+
+`CascadeType.PERSIST/MERGE/REMOVE/REFRESH/DETACH/ALL`. Comodo, pericoloso: una save
+del parent può cancellare aggregati. Usa con cura, di solito su aggregati DDD chiari.
+
+## Versionamento ottimistico
+
+```java
+@Entity
+class Order {
+    @Id Long id;
+    @Version Long version;
+}
+```
+
+Hibernate aggiunge `WHERE version = ?` su ogni UPDATE. Se concurrent update ha
+incrementato version, l'UPDATE colpisce 0 righe → `OptimisticLockException`.
+
+## Batch insert
+
+```yaml
+spring:
+  jpa:
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+```
+
+Hibernate raggruppa le INSERT in batch JDBC. Speedup x10-x50.
+
+## Bulk update / delete
+
+```java
+@Modifying
+@Query("UPDATE User u SET u.active = false WHERE u.lastLogin < :cutoff")
+int deactivate(Instant cutoff);
+```
+
+Generano un'unica SQL. Attenzione: bypassano cache di primo livello → svuotala
+(`em.clear()`) o richiama `flush()` prima.
+
+## JdbcTemplate: lo stile minimal
+
+```java
+@Repository
+public class UserRepo {
+    private final JdbcTemplate jdbc;
+    public UserRepo(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    public User findById(long id) {
+        return jdbc.queryForObject(
+            "SELECT id, email FROM users WHERE id = ?",
+            (rs, i) -> new User(rs.getLong(1), rs.getString(2)),
+            id);
+    }
+}
+```
+
+In Spring 6 c'è anche `JdbcClient` (fluent API più moderna).
+
+## jOOQ: SQL tipato
+
+```java
+List<User> users = ctx.select(USER.ID, USER.EMAIL)
+    .from(USER)
+    .where(USER.ACTIVE.eq(true))
+    .fetchInto(User.class);
+```
+
+Codice generato dal DB. Refactor del DB → errore di compilazione. Eccellente per
+query complesse e team che amano SQL.
+
+## Scegliere strato per strato
+
+Pattern realistico:
+
+- **CRUD semplice** → Spring Data JPA.
+- **Query complesse di lettura** → jOOQ o JdbcTemplate.
+- **Batch / ETL** → JDBC puro o Spring Batch.
+- **Read model / proiezione** → tabella materializzata + JdbcTemplate.

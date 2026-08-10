@@ -1,0 +1,138 @@
+# Design Patterns — Le basi
+
+I **Design Patterns** sono soluzioni ricorrenti a problemi ricorrenti di design OOP.
+Il libro di riferimento è *Design Patterns* della Gang of Four (Gamma, Helm, Johnson,
+Vlissides, 1994). Suddivisi in 3 famiglie:
+
+| Famiglia | Cosa risolvono | Esempi |
+|---|---|---|
+| **Creazionali** | Come creare oggetti | Factory, Builder, Singleton, Prototype |
+| **Strutturali** | Come comporre oggetti/classi | Adapter, Decorator, Facade, Proxy |
+| **Comportamentali** | Come interagiscono gli oggetti | Strategy, Observer, Command, Iterator |
+
+> 💡 I pattern non sono "regole": sono un **vocabolario** comune per parlare di design.
+> Usali quando descrivono naturalmente il tuo problema, non per "decorare" il codice.
+
+## Singleton
+
+Una sola istanza nell'intero programma.
+
+```java
+public final class Config {
+    private static final Config INSTANCE = new Config();
+    private Config() {}
+    public static Config get() { return INSTANCE; }
+}
+```
+
+Caveat: i singleton globali rendono il codice difficile da testare e accoppiato.
+In contesti moderni, usa il container DI (Spring) per gestire l'unicità.
+
+## Factory Method
+
+Demandare a una sottoclasse la creazione dell'istanza:
+
+```java
+public abstract class HttpClient {
+    public Response send(Request r) { return create().execute(r); }
+    protected abstract Connection create();
+}
+
+public class TlsHttpClient extends HttpClient {
+    protected Connection create() { return new TlsConnection(); }
+}
+```
+
+## Builder
+
+Per costruire oggetti complessi con molti parametri opzionali:
+
+```java
+HttpRequest req = HttpRequest.newBuilder()
+    .uri(URI.create("https://example.com"))
+    .header("X-Auth", token)
+    .timeout(Duration.ofSeconds(5))
+    .GET()
+    .build();
+```
+
+In Java moderno: record + costruttore canonico + factory statiche o Lombok `@Builder`.
+
+## Strategy
+
+Famiglia di algoritmi intercambiabili dietro a un'interfaccia:
+
+```java
+public interface Compression { byte[] compress(byte[] data); }
+public class GzipCompression  implements Compression { ... }
+public class DeflateCompression implements Compression { ... }
+
+public class FileWriter {
+    private final Compression c;
+    public FileWriter(Compression c) { this.c = c; }
+    public void write(byte[] data) { Files.write(path, c.compress(data)); }
+}
+```
+
+In Java moderno: spesso una lambda è sufficiente:
+
+```java
+public class FileWriter {
+    private final Function<byte[], byte[]> compress;
+    public FileWriter(Function<byte[], byte[]> compress) { this.compress = compress; }
+}
+```
+
+## Observer
+
+Notifica più oggetti quando uno cambia:
+
+```java
+public interface Listener<T> { void on(T event); }
+
+public class EventBus<T> {
+    private final List<Listener<T>> ls = new CopyOnWriteArrayList<>();
+    public void subscribe(Listener<T> l) { ls.add(l); }
+    public void publish(T e) { ls.forEach(l -> l.on(e)); }
+}
+```
+
+In Spring: `ApplicationEventPublisher` + `@EventListener`.
+
+## Adapter
+
+Adatta un'interfaccia a un'altra (es. wrap di una libreria esterna):
+
+```java
+public class LegacyApi {
+    public String fetch(int id) { ... }
+}
+
+public class ApiAdapter implements Repository {
+    private final LegacyApi legacy;
+    public ApiAdapter(LegacyApi legacy) { this.legacy = legacy; }
+    @Override public Optional<User> findById(long id) {
+        return Optional.ofNullable(legacy.fetch((int) id))
+                       .map(this::parse);
+    }
+}
+```
+
+## Decorator
+
+Avvolge un oggetto per aggiungerne il comportamento:
+
+```java
+public class LoggingClient implements HttpClient {
+    private final HttpClient delegate;
+    public LoggingClient(HttpClient d) { this.delegate = d; }
+    public Response send(Request r) {
+        long t = System.nanoTime();
+        try { return delegate.send(r); }
+        finally { log.info("took {}ns", System.nanoTime() - t); }
+    }
+}
+
+// uso:
+HttpClient c = new RetryClient(new LoggingClient(new BaseClient()));
+```

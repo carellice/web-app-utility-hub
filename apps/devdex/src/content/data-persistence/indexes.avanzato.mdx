@@ -1,0 +1,162 @@
+# Indici DB — Internals e ottimizzazione avanzata
+
+## Anatomia di un B-tree
+
+Un B-tree (in realtà spesso **B+tree**) è bilanciato e ad alto fan-out. Tipica
+struttura:
+
+```
+                    [root]
+                   /      \
+            [internal]   [internal]
+            /      \     /      \
+         [leaf]  [leaf] [leaf] [leaf]   ←  contengono RID/PK + valori
+            ←─────── linked list ───────→
+```
+
+Caratteristiche:
+
+- Altezza ≈ `log(N) / log(fanout)`. Con fan-out 200 e 1B righe → altezza ~4.
+- Range scan attraversa le foglie linkate.
+- Inserimenti possono causare split nodi → write amplification.
+
+## Cluster index vs non-clustered
+
+- **InnoDB / SQL Server**: PK è il cluster index. Le righe sono ordinate
+  fisicamente per PK. Gli indici secondari memorizzano la PK come "puntatore" alla riga.
+- **Postgres**: nessuno è cluster. Ogni indice memorizza `(key, CTID)` dove CTID è
+  un puntatore al blocco/offset fisico (heap tuple).
+
+Implicazione (Postgres): un `HOT update` può lasciare CTID obsoleti nei secondari
+finché VACUUM non li ripulisce. Per indici "covering" la `INCLUDE` è una possibile
+ottimizzazione che evita lookup heap.
+
+## Fillfactor
+
+```sql
+CREATE INDEX ... WITH (fillfactor = 80);
+```
+
+Riserva 20% di spazio nelle pagine per futuri update senza split. Tradeoff: pagine
+parzialmente vuote → indice più grande.
+
+## Index bloat e VACUUM
+
+In Postgres, gli update creano nuove tuple e marcano le vecchie come "dead". L'indice
+mantiene i puntatori obsoleti finché VACUUM li raccoglie. Indici "bloati" =
+performance peggiore.
+
+```sql
+REINDEX INDEX CONCURRENTLY idx_users_email;
+```
+
+`CONCURRENTLY` non blocca le scritture (Postgres 12+).
+
+## Multi-column index: ordine delle colonne
+
+Scelta consapevole:
+
+1. **Equality prima di range**: `(status, created_at)` per
+   `WHERE status = 'X' AND created_at > '...'`. Inverso meno efficiente.
+2. **Selettività decrescente**: colonna più selettiva prima (in mancanza di
+   equality/range pattern chiaro).
+3. **Ordinamenti**: se l'indice termina con la colonna ordinata, `ORDER BY` è gratuito.
+
+## Index merge (MySQL)
+
+MySQL può combinare due indici monocolonna a runtime: meglio di niente, peggio di un
+indice composito.
+
+```sql
+EXPLAIN SELECT * FROM users WHERE city = 'Roma' AND age = 30;
+-- type: index_merge
+```
+
+Quando lo vedi, valuta se creare l'indice composito.
+
+## Bitmap index (Oracle, Postgres parziale)
+
+Postgres usa **bitmap index scan** anche su B-tree per combinare più predicati:
+
+1. Scansiona idx_a → bitmap di tuple matching.
+2. Scansiona idx_b → bitmap.
+3. AND/OR tra bitmap.
+4. Heap fetch sulle tuple finali.
+
+Vantaggio: ottimo quando ogni indice singolo dà poche righe ma la combinazione è
+efficiente.
+
+## Index suggestions
+
+Strumenti:
+
+- **EXPLAIN ANALYZE**: vedi cosa il planner sceglie.
+- **pg_qualstats** (Postgres): tracking dei predicati per suggerire indici.
+- **Percona Toolkit** (MySQL): `pt-index-usage`.
+- **Database Engine Tuning Advisor** (SQL Server).
+- **EverSQL, dbForge**: tool commerciali.
+
+## Costi di scrittura
+
+Per una INSERT su tabella con N indici, il DB deve:
+
+1. Inserire la riga nella heap.
+2. Inserire la chiave in **ognuno** degli N indici.
+3. Aggiornare statistiche (a tratti).
+
+Su tabelle write-heavy, ogni indice extra costa. Per partizioni storiche
+(read-only), aggiungere indici post-load è una buona strategia.
+
+## Vincoli `UNIQUE` ≠ controllo applicativo
+
+Un vincolo `UNIQUE` lato DB è atomico e race-free. In applicazione "check then insert"
+ha race condition. Sempre dichiarare il vincolo:
+
+```sql
+ALTER TABLE users ADD CONSTRAINT email_unique UNIQUE (email);
+```
+
+E gestire la `UniqueViolationException` come 409 Conflict.
+
+## Function-based + immutable
+
+Per indici funzionali, la funzione deve essere `IMMUTABLE`:
+
+```sql
+CREATE FUNCTION normalize(text) RETURNS text AS $$
+    SELECT lower(regexp_replace($1, '\s+', '', 'g'))
+$$ LANGUAGE SQL IMMUTABLE;
+
+CREATE INDEX idx_user_normalized ON users(normalize(email));
+```
+
+`IMMUTABLE` significa: stesso input → stesso output, sempre. Garanzia necessaria
+perché Postgres riusi il valore dall'indice.
+
+## Covering index in MySQL InnoDB
+
+Tutti gli indici secondari InnoDB **già includono** la PK come "puntatore" alla riga.
+Quindi un indice `(user_id, status)` è automaticamente covering per query con SELECT
+`(user_id, status, id)`. Sfrutta questa peculiarità: scegli PK piccola (es. INT/BIGINT
+auto-increment), così tutti gli indici secondari sono compatti.
+
+## Indici e GraphQL / API list
+
+Pattern comune: API list con cursor pagination ordinata per `created_at`.
+
+```sql
+CREATE INDEX idx_orders_created_at ON orders(created_at DESC);
+
+SELECT * FROM orders WHERE created_at < $cursor ORDER BY created_at DESC LIMIT 50;
+```
+
+L'indice supporta sia il WHERE che l'ORDER BY in un'unica scansione.
+
+## Domande tipiche al colloquio
+
+- *"Cos'è leftmost prefix?"*
+- *"Differenza tra B-tree e hash index?"*
+- *"Cluster index vs secondary in InnoDB?"*
+- *"Quando un indice non viene usato anche se esiste?"* — funzioni, type mismatch, low selectivity.
+- *"Cos'è bloat e come si gestisce?"* — VACUUM, REINDEX CONCURRENTLY.
+- *"Quali indici per JSON in Postgres?"* — GIN su JSONB.

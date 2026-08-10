@@ -1,0 +1,69 @@
+# ForkJoinPool — Le basi
+
+Un `ForkJoinPool` è uno speciale thread pool ottimizzato per task che si dividono
+ricorsivamente (**divide-and-conquer**). Introdotto in Java 7, è il backbone di:
+
+- `parallelStream()` e `Stream.parallel()`.
+- `CompletableFuture` (commonPool di default).
+- `java.util.concurrent.RecursiveTask` / `RecursiveAction`.
+
+## Caratteristiche distintive
+
+- Ogni worker ha la propria **deque** locale.
+- Quando finisce i suoi task, **ruba** lavoro dalla coda di altri (**work-stealing**).
+- Submit di task figli (`fork()`) è quasi gratis: vengono pushati nella deque locale.
+
+## Hello world: somma ricorsiva
+
+```java
+public class SumTask extends RecursiveTask<Long> {
+    private final int[] arr;
+    private final int lo, hi;
+    private static final int THRESHOLD = 10_000;
+
+    public SumTask(int[] arr, int lo, int hi) {
+        this.arr = arr; this.lo = lo; this.hi = hi;
+    }
+
+    @Override
+    protected Long compute() {
+        if (hi - lo <= THRESHOLD) {
+            long s = 0;
+            for (int i = lo; i < hi; i++) s += arr[i];
+            return s;
+        }
+        int mid = (lo + hi) >>> 1;
+        SumTask left  = new SumTask(arr, lo, mid);
+        SumTask right = new SumTask(arr, mid, hi);
+        left.fork();              // push nella deque locale
+        long r = right.compute(); // calcola in-thread
+        long l = left.join();     // attende il fork
+        return l + r;
+    }
+}
+
+// utilizzo:
+long total = ForkJoinPool.commonPool().invoke(new SumTask(arr, 0, arr.length));
+```
+
+## commonPool
+
+Il `ForkJoinPool.commonPool()` è un pool statico condiviso da tutta la JVM. Numero di
+worker di default: `Runtime.getRuntime().availableProcessors() - 1`.
+
+```java
+System.out.println(ForkJoinPool.commonPool().getParallelism());
+```
+
+## Quando usarlo
+
+- Lavori **CPU-bound** divisibili (somma array, ordinamenti, somma di matrici, ricerche
+  parallele in trie/grafi).
+- Stream paralleli quando i criteri sono soddisfatti (dataset grande, operazione pura).
+
+## Quando NON usarlo
+
+- Task **bloccanti** (I/O, DB, rete): occuperebbero worker che diventerebbero inutili,
+  affamando gli altri task.
+- Operazioni che hanno bisogno di un ordine preciso.
+- Dataset minuscoli: l'overhead di fork/join supera il guadagno.

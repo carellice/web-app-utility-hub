@@ -1,0 +1,92 @@
+# Microservices — Nuggets and advanced patterns
+
+## Saga pattern
+
+A distributed business transaction = chain of local transactions +
+compensations.
+
+### Choreography (events)
+
+Each service reacts to events and emits more. No coordinator. Simple to
+implement, hard to reason about as the number of services grows.
+
+```text
+OrderCreated → Payments
+PaymentDone  → Inventory
+StockReserved → Shipping
+ShippingFail → emits OrderRefundRequested → Payments refunds
+```
+
+### Orchestration
+
+An orchestrator (Temporal, Camunda, Step Functions, Spring State Machine)
+dictates the steps. More visible and debuggable, but it is a single point of
+logic.
+
+## Outbox + CDC
+
+To publish events **reliably** after a DB commit:
+
+1. Same transaction: write into an `outbox` table.
+2. Debezium reads the DB WAL and publishes events to Kafka.
+3. No "sent" marker needed (the guarantee is from log replication).
+
+Solves "dual write" (DB + broker are not atomic with each other).
+
+## Idempotency and the exactly-once illusion
+
+In distributed systems, true "exactly-once" doesn't exist: you settle for
+*at-least-once delivery* + *idempotent consumer*. Idempotency key, dedup table,
+version/sequence numbers.
+
+```sql
+INSERT INTO processed_events(event_id) VALUES (?)
+ON CONFLICT DO NOTHING RETURNING 1;
+-- if RETURNING is empty, already processed
+```
+
+## Distributed tracing — propagation
+
+Standard: **W3C Trace Context** (`traceparent` header). The OpenTelemetry SDK
+propagates it automatically for HTTP/gRPC. For Kafka, propagate in the record
+headers.
+
+> 💡 Typical mistake: forgetting to propagate the traceId in async threads
+> (executor, CompletableFuture). The context is lost, the trace breaks. Use
+> `ContextPropagators`.
+
+## Service mesh
+
+Istio, Linkerd: move from library to **sidecar** (Envoy) things like:
+
+- Automatic mTLS.
+- Retry / timeout / circuit breaking.
+- Traffic shifting (canary, blue/green).
+- Uniform telemetry.
+
+Pros: less code in services. Cons: new layer to operate, extra latency (~ms).
+
+## Multi-region and split brain
+
+Under a network partition between regions, you must choose: who sees the latest
+truth? Patterns:
+
+- **Single writer per key** (e.g. shard by `tenant_id`).
+- **Active-passive** with automatic failover (Patroni, Stolon for Postgres).
+- **Active-active CRDT-based** for simple data (counters, sets).
+
+## Deployment patterns
+
+- **Blue/green**: two identical environments, atomic traffic switch.
+- **Canary**: 1% → 5% → 25% → 100% of traffic to the new deploy.
+- **Shadow / dark launch**: send traffic in parallel, ignore the response,
+  measure.
+- **Feature flag** (LaunchDarkly, Unleash): decouple deploy from release.
+
+## Anti-patterns
+
+- **Shared library godzilla**: all microservices import the same monolithic
+  library → updating it is like deploying the monolith.
+- **Sync chain of 5+ services**: every call adds latency and failure
+  probability. Consider async / event-driven.
+- **Shared DB "because it's fast"**: breaks deploy and model independence.

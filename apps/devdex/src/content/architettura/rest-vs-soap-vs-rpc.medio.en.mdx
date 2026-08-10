@@ -1,0 +1,67 @@
+# REST vs SOAP vs RPC — Design
+
+## REST "done right"
+
+Roy Fielding (REST's author) defines 6 constraints, but people often stop at 3:
+
+1. **Stateless** — the server keeps no session between requests.
+2. **Uniform interface** — resources, representations, HATEOAS.
+3. **Cacheable** — responses state whether and how to be cached.
+
+Plus: **client-server**, **layered system**, **code-on-demand** (optional).
+
+> 💬 Most APIs we call "REST" are actually *"HTTP+JSON"*. No HATEOAS, verb
+> semantics half-baked, creative status codes. It is fine, just be aware.
+
+### Good practices
+
+- Plural nouns: `/orders`, not `/getOrders`.
+- Semantic status codes: 200, 201 (Created), 204 (No Content), 400, 404, 409,
+  422 (Unprocessable Entity), 500.
+- Idempotency: PUT and DELETE must be idempotent. POST generally is not, but
+  with an `Idempotency-Key` header you can make it so.
+- Pagination via cursor (`?cursor=abc&limit=20`) or offset
+  (`?page=2&size=20`).
+- Versioning: `/v1/orders` (URI) or `Accept: application/vnd.api.v1+json`
+  (header).
+
+## gRPC vs REST: where it wins
+
+- Throughput: Protobuf is 3–10× more compact and faster to parse than JSON.
+- Streaming: native bidirectional.
+- Contracts: `.proto` is the source of truth, you generate typed
+  client/server.
+
+Cost: hard to debug by hand, browsers don't speak it directly (need gRPC-Web),
+tooling learning curve.
+
+## SOAP: what it still brought
+
+- **WS-Security**: message-level signing/encryption (not just TLS).
+- **WS-Atomic Transaction**: distributed transactions (XA-like) across services.
+- **WSDL**: a very formal contract, generatable in any language.
+
+For new projects, OpenAPI + JSON covers 80% of these needs without the weight.
+
+## GraphQL: when it makes sense
+
+- Frontend that needs **heterogeneous data** and wants to avoid multiple
+  round-trips.
+- Backend aggregator (BFF / API gateway).
+- Explicit shared schema (SDL).
+
+Costs: server-side complexity (N+1, field-level authorization, caching),
+managing slow queries.
+
+## Idempotency-Key
+
+```http
+POST /payments HTTP/1.1
+Idempotency-Key: 3f8c1ab2-...
+Content-Type: application/json
+
+{ "amount": 50, "currency": "EUR" }
+```
+
+The server stores a `key -> response` mapping. If the client retries with the
+same key, it gets the **same** response. Stripe is the canonical example.

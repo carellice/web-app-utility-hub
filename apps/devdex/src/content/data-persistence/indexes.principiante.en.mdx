@@ -1,0 +1,83 @@
+# DB Indexes — The basics
+
+An **index** is an auxiliary structure the DBMS maintains to quickly locate
+table rows. Without an index, a query with `WHERE` must scan the entire table
+(**full table scan**).
+
+```sql
+CREATE INDEX idx_users_email ON users(email);
+```
+
+From now on, `SELECT * FROM users WHERE email = ?` can use the index instead of
+scanning every row.
+
+## Trade-offs
+
+| Pros | Cons |
+|---|---|
+| Very fast reads | Slower writes (must update the index) |
+| Faster aggregations and ORDER BY | Disk space |
+| Implements `UNIQUE` constraints | Statistics to maintain |
+
+> 💡 More indexes = more I/O and RAM used. Only add justified ones.
+
+## Basic types
+
+- **B-tree** (default): balanced, fast range queries (`<`, `>`, `BETWEEN`).
+- **Hash**: equality only (`=`). Very rare as a default (Postgres has it but
+  requires explicit configuration).
+- **Full-text**: text search (`MATCH ... AGAINST` MySQL, `tsvector` Postgres).
+- **Spatial**: PostGIS, MySQL Spatial.
+- **GIN/GiST/BRIN** (Postgres): for JSON, arrays, ranges, time series.
+
+## Primary key
+
+A **primary key** automatically creates an index (`UNIQUE` + `NOT NULL`). In
+many DBMSs it is also the **cluster key**: rows are physically ordered by the
+PK (InnoDB, SQL Server). In Postgres it isn't: all indexes are "secondary".
+
+## Composite index
+
+```sql
+CREATE INDEX idx_orders_user_status ON orders(user_id, status);
+```
+
+Useful for queries like:
+
+```sql
+SELECT * FROM orders WHERE user_id = ? AND status = 'PAID';
+```
+
+**Leftmost prefix rule**: the index is used only if the query fixes the columns
+**from the left**. See the Intermediate level for details.
+
+## Check that an index is being used
+
+```sql
+EXPLAIN SELECT * FROM users WHERE email = 'a@b.it';
+```
+
+Output (Postgres):
+
+```
+Index Scan using idx_users_email on users  (cost=0.29..8.31 rows=1 width=...)
+   Index Cond: ((email)::text = 'a@b.it'::text)
+```
+
+If you see `Seq Scan` → full table scan, the index is not used or doesn't
+exist.
+
+## When to create an index?
+
+When:
+
+1. The column is often used in `WHERE`, `JOIN`, `ORDER BY`.
+2. Cardinality is reasonably high (many distinct values).
+3. The table is large enough that scanning is costly.
+
+When **not**:
+
+1. Small table: full scan is already fast.
+2. Columns with few distinct values (e.g. booleans): partial indexes work
+   better.
+3. On hot-write data if reads are rare.

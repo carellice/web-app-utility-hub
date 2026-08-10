@@ -1,0 +1,59 @@
+# Microservices — Design
+
+## Bounded context (Domain-Driven Design)
+
+Service boundaries follow the **bounded contexts** of the domain: a sub-area
+with a homogeneous language. *Order* in checkout differs from *Order* in
+logistics: they live in different services.
+
+Useful tools: **Event Storming** (workshop), **Context Mapping**.
+
+## Database per service
+
+Every microservice owns **its** schema/DB. No cross-service JOINs.
+
+```text
+Orders DB   ←  Orders service
+Payments DB ←  Payments service
+```
+
+If you feel the urge to JOIN across DBs, that's a symptom of wrong boundaries.
+
+## Communication: styles
+
+| Style | Example | Pros | Cons |
+|---|---|---|---|
+| Sync request/reply | REST, gRPC | simplicity, debug | couples availability, latency |
+| Async event-driven | Kafka, RabbitMQ | resilience, decoupling | complexity, ordering, idempotency |
+| Async point-to-point | SQS | simple, known guarantees | less fan-out |
+| CDC (Change Data Capture) | Debezium | reactive to DB state | couples to DB schema |
+
+## Resilience
+
+- **Timeout**: every call must have one (default `infinite` = death).
+- **Retry with backoff**: for idempotent calls.
+- **Circuit breaker** (Resilience4j, Hystrix retired): if a service is down,
+  stop calling it and fail-fast.
+- **Bulkhead**: separate pools per dependency, so saturation in one doesn't
+  hurt the others.
+
+```java
+@CircuitBreaker(name = "payments", fallbackMethod = "cached")
+public Payment charge(...) { ... }
+```
+
+## Observability: 3 pillars
+
+1. **Structured logs** (JSON) with correlation-id (traceId).
+2. **Metrics** (Prometheus, Micrometer): latency p50/p95/p99, error rate, RPS.
+3. **Distributed tracing** (OpenTelemetry): follow a request across N services.
+
+## API contract
+
+The "contract" between services is critical. Tools:
+
+- **OpenAPI** for REST.
+- **Protobuf** for gRPC.
+- **AsyncAPI** for events.
+- **Consumer-driven contracts** (Pact, Spring Cloud Contract): the consumer
+  publishes its expectations, the producer verifies them in CI.

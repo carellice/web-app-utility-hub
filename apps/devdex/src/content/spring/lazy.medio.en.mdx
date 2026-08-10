@@ -1,0 +1,112 @@
+# @Lazy — Patterns and tuning
+
+## Lazy + dependency cycles
+
+Spring 2.6 disables cycles by default
+(`spring.main.allow-circular-references=false`). To break a legitimate cycle
+(e.g. two aggregates that know each other):
+
+```java
+public A(@Lazy B b) { this.b = b; }   // A sees B via proxy
+public B(A a) { this.a = a; }         // B sees A directly
+```
+
+It works because:
+
+1. Spring creates the proxy for `B` (lazy).
+2. Instantiates `A` with the proxy.
+3. Instantiates `B` normally (passing `A`).
+4. When `A.somethingThatUsesB()` is called, the proxy does *late binding* on
+   `B`.
+
+## Lazy for startup optimization
+
+```yaml
+spring:
+  main:
+    lazy-initialization: true
+```
+
+Real use cases:
+
+- **Serverless functions** (e.g. AWS Lambda with Spring): 1s startup instead
+  of 3s.
+- **Dev mode**: faster feedback loop, quick reloads.
+- **Test suites**: every `@SpringBootTest` starts faster.
+
+## Combined with `@Bean(initMethod, autowire)`
+
+```java
+@Configuration
+public class Cfg {
+    @Bean @Lazy
+    public ExpensiveCache cache() {
+        return new ExpensiveCache(loadAll());
+    }
+}
+```
+
+## Lazy does NOT impact `@EventListener`
+
+If a lazy bean registers for `ApplicationReadyEvent` but is not yet
+instantiated, **the event is lost** if nothing "touches" it before. Spring 5+
+can discover listeners, but in lazy mode there are edge cases — see
+`EventListenerMethodProcessor`.
+
+Workaround: mark listeners as **non-lazy** explicitly:
+
+```java
+@Component
+public class Bootstrap {
+    @EventListener(ApplicationReadyEvent.class)
+    public void onReady() { ... }
+}
+```
+
+And keep lazy only for "application" beans.
+
+## Lazy + JPA
+
+JPA already has a concept of **lazy loading** (relationships
+`FetchType.LAZY`). They are orthogonal concepts:
+
+- Spring `@Lazy`: bean instantiation.
+- `FetchType.LAZY`: loading of an entity association.
+
+Don't confuse them at an interview.
+
+## Measuring startup
+
+```bash
+time java -jar app.jar --spring.main.lazy-initialization=true
+```
+
+Or:
+
+```
+ConfigurableApplicationContext ctx = SpringApplication.run(...);
+System.out.println("ready in " + (System.currentTimeMillis() - ctx.getStartupDate()) + "ms");
+```
+
+For fine analysis: `ApplicationStartup`:
+
+```java
+public static void main(String[] args) {
+    var app = new SpringApplication(App.class);
+    app.setApplicationStartup(new BufferingApplicationStartup(2048));
+    app.run(args);
+}
+```
+
+The output can be exported to JFR or an Actuator endpoint.
+
+## Anti-pattern: lazy everywhere
+
+If you put `@Lazy` on 200 beans to "speed things up", you end up:
+
+- Moving the cost from startup to the request path.
+- Hiding errors that show up at 3 AM in prod.
+- Making the bean-graph debug harder.
+
+Recommended strategy: profile startup, lazy targeted on the few heavy beans
+**not always used**.

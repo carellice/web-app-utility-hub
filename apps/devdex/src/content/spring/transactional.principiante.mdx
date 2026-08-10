@@ -1,0 +1,55 @@
+# @Transactional — Le basi
+
+`@Transactional` dichiara che un metodo (o tutti i metodi di una classe) si esegue
+**dentro una transazione database**. Spring apre la transazione prima del metodo, fa
+commit alla fine, rollback se viene lanciata un'eccezione **unchecked**.
+
+```java
+@Service
+public class OrderService {
+
+    @Transactional
+    public Order place(NewOrder cmd) {
+        var order = repo.save(new Order(cmd));
+        ledger.charge(order);   // se fallisce → rollback dell'INSERT precedente
+        return order;
+    }
+}
+```
+
+## Comportamento di default
+
+- Rollback su **RuntimeException** e **Error**.
+- **No** rollback su `Exception` checked: per averlo, `@Transactional(rollbackFor = Exception.class)`.
+
+## Read-only
+
+```java
+@Transactional(readOnly = true)
+public Page<Order> list(Pageable p) { ... }
+```
+
+Suggerimento all'ORM di non fare dirty-check e al DB di usare un percorso più
+leggero (es. snapshot read in Postgres).
+
+## Dove metterla
+
+- Sul **service**, non sul controller (la UI non sa dei DB).
+- Non su repository: Spring Data ne mette già una di default per metodo.
+
+## L'errore classico
+
+`@Transactional` funziona via **proxy AOP**. Una chiamata da `methodA()` non-transazionale
+a `this.methodB()` transazionale **non** apre la transazione: il proxy non interviene
+sulla self-invocation.
+
+```java
+@Service
+public class Bad {
+    public void run() {
+        doInsert();      // ⚠️ NON è transazionale, sebbene doInsert lo sia
+    }
+    @Transactional
+    public void doInsert() { ... }
+}
+```

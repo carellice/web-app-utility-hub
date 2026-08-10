@@ -1,0 +1,82 @@
+# CompletableFuture — The basics
+
+A `CompletableFuture<T>` represents an asynchronous computation that will
+**complete** in the future with a value of type `T` or an exception.
+Introduced in Java 8, it replaces `Future` for composed scenarios.
+
+```java
+CompletableFuture<String> cf = CompletableFuture.supplyAsync(() -> {
+    Thread.sleep(500);
+    return "hello";
+});
+
+cf.thenAccept(s -> System.out.println(s));   // prints "hello" when ready
+```
+
+## The 3 ways to create a CompletableFuture
+
+```java
+// 1) Async with value
+CompletableFuture<String> a = CompletableFuture.supplyAsync(() -> fetch());
+
+// 2) Already completed (handy in tests)
+CompletableFuture<Integer> b = CompletableFuture.completedFuture(42);
+
+// 3) To be completed manually
+CompletableFuture<String> c = new CompletableFuture<>();
+// later:
+c.complete("ok");
+// or
+c.completeExceptionally(new IOException("boom"));
+```
+
+## Getting the result
+
+```java
+String result = cf.get();                          // blocking, can throw InterruptedException
+String result = cf.getNow("default");              // non-blocking: default if not ready
+String result = cf.get(2, TimeUnit.SECONDS);       // with timeout
+String result = cf.join();                         // blocking, unchecked exceptions
+```
+
+> 💡 In async code do **not** use `.get()`: you block the thread. Use
+> `thenApply` / `thenAccept` to react to completion.
+
+## Essential operators
+
+```java
+cf.thenApply(s -> s.toUpperCase());         // T -> R
+cf.thenAccept(s -> log.info(s));            // T -> void
+cf.thenRun(() -> log.info("done"));         // no input, no output
+cf.thenCompose(s -> fetchMore(s));          // T -> CompletableFuture<R>  (flatMap)
+cf.thenCombine(other, (a, b) -> a + b);     // combine two futures
+```
+
+## Errors
+
+```java
+cf.exceptionally(ex -> "fallback");          // T on success, recovery on failure
+cf.handle((value, ex) -> ex != null ? "ko" : value);
+```
+
+## Practical example
+
+```java
+CompletableFuture<User> user = api.getUserAsync(id);
+CompletableFuture<Cart> cart = api.getCartAsync(id);
+
+user.thenCombine(cart, (u, c) -> new Checkout(u, c))
+    .thenAccept(this::send)
+    .exceptionally(ex -> { log.error(ex); return null; });
+```
+
+## Difference from `Future`
+
+| | `Future<T>` | `CompletableFuture<T>` |
+|---|---|---|
+| Callbacks / chains | ❌ only `get()` | ✅ `thenApply`, `thenCompose`, … |
+| Manual completion | ❌ | ✅ `complete()` |
+| Combinators | ❌ | ✅ `allOf`, `anyOf` |
+| API | minimal | very rich |
+
+For new async code, always use `CompletableFuture`.

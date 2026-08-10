@@ -1,0 +1,62 @@
+# Spring Boot — Cos'è e cosa risolve
+
+Spring Boot è un **opinionated framework** sopra a Spring: ti dà un'app pronta in
+poche righe, con un server embedded (Tomcat), configurazioni di default sensate e una
+gestione delle dipendenze semplificata via **starter**.
+
+```java
+@SpringBootApplication
+public class App {
+    public static void main(String[] args) {
+        SpringApplication.run(App.class, args);
+    }
+}
+```
+
+`@SpringBootApplication` racchiude tre annotazioni:
+
+- `@SpringBootConfiguration` — variante di `@Configuration`.
+- `@EnableAutoConfiguration` — accende l'auto-config.
+- `@ComponentScan` — scansiona il package corrente e i sub-package.
+
+## Starter
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+```
+
+Uno starter è un POM "vuoto" che porta come transitive le dipendenze giuste già
+allineate alla versione di Boot in uso.
+
+## application.yml / .properties
+
+```yaml
+server:
+  port: 8081
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost/devdex
+    username: ${DB_USER}
+    password: ${DB_PASS}
+```
+
+I valori vengono iniettati con `@Value`, oppure (meglio) tramite
+`@ConfigurationProperties` su una classe POJO.
+
+## Profili
+
+```yaml
+spring:
+  profiles:
+    active: dev
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+```
+
+Si attivano con `--spring.profiles.active=prod` o variabili d'ambiente.

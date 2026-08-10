@@ -1,0 +1,172 @@
+# SDLC — Avanzato: CD, feature flag, incident management
+
+## Continuous Deployment vs Continuous Delivery
+
+- **Delivery**: ogni commit produce un artefatto deployable; il rilascio è manuale.
+- **Deployment**: ogni commit che passa i test va in produzione, automaticamente.
+
+CD richiede:
+
+- Test automatici affidabili (no flaky).
+- Rollback automatico se health check fallisce.
+- Feature flag per disaccoppiare deploy da release.
+- Telemetria e alert.
+
+## Progressive delivery
+
+Da feature flag a tecniche avanzate:
+
+- **Canary release**: 1% → 5% → 25% → 100%. Auto-rollback se metric degrada.
+- **Blue/Green**: due ambienti, switch atomico.
+- **Shadow / Dark traffic**: copia del traffico in parallelo, ignora risposta,
+  confronta.
+- **Ring deployment**: prima utenti interni, poi early adopter, poi tutti.
+
+## Feature flag
+
+```java
+if (flags.isEnabled("new-checkout", userId)) {
+    return newCheckout(...);
+}
+return oldCheckout(...);
+```
+
+Strumenti: LaunchDarkly, Unleash, OpenFeature, Flagsmith.
+
+Best practice:
+
+- Flag con TTL: appena raggiunto 100%, rimuovi il codice deprecato.
+- Convenzione: max N flag per servizio (es. 10). Oltre, debito tecnico.
+- Logging del valore del flag in ogni request → debug.
+
+## Test environments
+
+| Env | Scopo | Dati |
+|---|---|---|
+| Local | sviluppatore | mock / docker-compose |
+| Preview / PR env | review automatica | sintetici |
+| Staging | integration end-to-end | dump anonimizzato |
+| Production | utenti reali | reali |
+
+Per progetti seri: **ephemeral environments** per ogni PR (Vercel preview, Heroku
+Review Apps, K8s namespace dinamici).
+
+## Database migrations
+
+Strumenti: **Flyway**, **Liquibase**, **Atlas**, **Sqitch**.
+
+Best practice:
+
+- Migration *additiva* prima del codice; rimozione *dopo* che il codice non la usa più.
+- Mai DROP in una migration "live": expand/contract.
+- Migration idempotenti se possibile.
+- Lock per evitare doppia esecuzione in cluster.
+
+```text
+1) Expand: aggiungi colonna nullable
+2) Backfill: popola
+3) Code: leggi/scrivi nuova colonna
+4) Contract: rimuovi vecchia colonna (in release successiva)
+```
+
+## Incident management
+
+### Severità
+
+- **SEV1**: outage diffuso, pagamento bloccato.
+- **SEV2**: degradazione importante.
+- **SEV3**: bug visibile, non critico.
+
+### Process
+
+1. Detect (alert, customer report).
+2. **On-call** prende ownership.
+3. **Mitigate** prima di "fix": rollback, scale up, feature flag off.
+4. Comunicare (status page interna).
+5. Fix forward.
+6. **Postmortem blameless**: cosa è successo, cosa abbiamo imparato, action item.
+
+## Postmortem template
+
+```markdown
+# Postmortem: <breve>
+
+## Impatto
+- Quando, durata, numero utenti, revenue impact.
+
+## Timeline
+- T0: alert
+- T1: mitigation
+- T2: full recovery
+
+## Root cause
+- 5 perché.
+
+## Cosa è andato bene
+## Cosa è andato male
+## Cosa cambiamo
+```
+
+## SLO / SLI / SLA
+
+- **SLI**: indicatore (es. latency p95).
+- **SLO**: obiettivo interno (es. p95 < 500 ms al 99.5%).
+- **SLA**: contratto col cliente (es. uptime 99.9%, con penali).
+
+**Error budget**: 100% - SLO. Lo usi per decidere quando rallentare le release.
+SLO 99.9% mensile = ~43 minuti di errore budget al mese.
+
+## Architectural Fitness Functions
+
+Misurare automaticamente "quanto bene" l'architettura rispetta i requisiti
+non-funzionali:
+
+- Test che falliscono se la latency p95 di un endpoint regredisce.
+- Test che falliscono se un servizio inizia a dipendere da uno che non dovrebbe (vincoli architetturali).
+- Test su build size, startup time, dipendenze.
+
+## "You build it, you run it"
+
+DevOps culturale: il team che scrive il codice ne risponde anche in operations.
+On-call rotation, no "throw over the wall".
+
+## Cost-aware development
+
+In cloud, ogni decisione architetturale ha un costo:
+
+- **FinOps**: discipline per ottimizzare la spesa.
+- Tag risorse per business unit.
+- Dashboard di costi per servizio.
+- Revisione costi mensile, target di riduzione.
+
+## Compliance e regolamentazioni
+
+- **GDPR**: data protection, right to be forgotten, DPA.
+- **SOC 2**: audit di security/availability/processing/integrity/privacy.
+- **PCI DSS**: se gestisci pagamenti.
+- **HIPAA**: se gestisci dati sanitari (USA).
+
+Effetti tipici nel SDLC: data retention policy, audit log immutabili, access control,
+incident response plan documentato.
+
+## AI nel SDLC (2025-2026)
+
+- **Code completion / co-pilot**: produttività individuale.
+- **Code review automatica**: scansione PR, suggerimenti.
+- **Test generation**: generare unit test a partire dal codice.
+- **Documentation**: README/onboarding/runbook generati.
+- **Incident assistance**: triage di alert, suggerimento di fix sulla base di
+  postmortem precedenti.
+
+Punto chiave: l'AI non sostituisce il senior, accelera il junior. Code review umana
+resta indispensabile.
+
+## Domande tipiche al colloquio
+
+- *"Trunk-based vs GitFlow?"*
+- *"Differenza tra Continuous Delivery e Deployment?"*
+- *"Cosa sono le DORA metrics?"*
+- *"Come gestiresti un incident SEV1 alle 3 di notte?"*
+- *"Feature flag: pro e contro?"*
+- *"Cos'è l'expand/contract per le migration DB?"*
+- *"SLO vs SLA: cosa è interno e cosa contrattuale?"*

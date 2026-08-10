@@ -1,0 +1,129 @@
+# Indici DB — Pattern intermedi
+
+## Leftmost prefix in dettaglio
+
+Indice `(country, city, age)`. Query che lo usano:
+
+```sql
+WHERE country = 'IT'                            -- ✅ usa (country)
+WHERE country = 'IT' AND city = 'Roma'          -- ✅ usa (country, city)
+WHERE country = 'IT' AND city = 'Roma' AND age = 30  -- ✅ usa tutto
+WHERE country = 'IT' AND age = 30               -- partial: usa (country), poi filtra age
+WHERE city = 'Roma'                             -- ❌ no leftmost
+```
+
+Pensa all'indice come a una "rubrica telefonica" ordinata per cognome → nome → età:
+serve sapere il cognome per cercare.
+
+## Indici parziali (Postgres, SQL Server)
+
+Indicizzare solo un sottoinsieme:
+
+```sql
+CREATE INDEX idx_active_users ON users(email) WHERE status = 'ACTIVE';
+```
+
+Solo le righe attive sono nell'indice. Risultato: indice piccolo, query con
+`WHERE status = 'ACTIVE' AND email = ?` velocissima.
+
+## Indici covering (INCLUDE)
+
+```sql
+CREATE INDEX idx_orders_user ON orders(user_id) INCLUDE (total, created_at);
+```
+
+L'indice contiene le colonne nel WHERE + quelle SELECT. La query è soddisfatta
+**solo** dall'indice: **index-only scan**, niente heap fetch.
+
+In MySQL si simula mettendo le colonne nell'indice composito:
+`(user_id, total, created_at)` — ma viola un po' la pulizia perché tutte sono "key".
+
+## Indici funzionali
+
+```sql
+CREATE INDEX idx_lower_email ON users(LOWER(email));
+SELECT * FROM users WHERE LOWER(email) = LOWER('Anna@Example.com');
+```
+
+Senza indice funzionale, l'`UPPER`/`LOWER` impedisce uso dell'indice classico.
+
+## Hash index
+
+Postgres ha `USING HASH`, ma con limiti:
+
+```sql
+CREATE INDEX idx_users_uuid ON users USING HASH (uuid);
+```
+
+- Solo equality (`=`), nessun range.
+- Più piccolo del B-tree per chiavi grandi.
+- Postgres 10+: gli hash index sono finalmente WAL-logged e replicabili.
+
+## GIN / GiST (Postgres)
+
+**GIN** (Generalized Inverted Index): ottimo per array, JSON, full-text.
+
+```sql
+CREATE INDEX idx_tags ON posts USING GIN (tags);
+SELECT * FROM posts WHERE tags @> ARRAY['java'];
+```
+
+**GiST**: range types, geometrie, similarity (trigram).
+
+```sql
+CREATE INDEX idx_period ON bookings USING GIST (period);
+SELECT * FROM bookings WHERE period && tstzrange(now(), now() + interval '1 day');
+```
+
+## BRIN (Block Range INdex)
+
+Per tabelle enormi con dati naturalmente ordinati (time series, logs):
+
+```sql
+CREATE INDEX idx_events_brin ON events USING BRIN (occurred_at);
+```
+
+Memorizza min/max per blocco di pagine: piccolo, veloce a costruirsi, scansione
+ridotta. Pessimo se i dati non sono ordinati.
+
+## UNIQUE e null
+
+```sql
+CREATE UNIQUE INDEX idx_email_unique ON users(email);
+```
+
+In Postgres, `NULL != NULL`: puoi avere N righe con `email = NULL`. In MySQL InnoDB
+stessa cosa per default; in SQL Server `UNIQUE` permette **al più una** riga con NULL.
+Trappola portabilità.
+
+## Statistiche e cardinalità
+
+Il pianificatore usa le statistiche per stimare il costo. Statistiche obsolete →
+piani sbagliati:
+
+```sql
+ANALYZE users;        -- Postgres
+ANALYZE TABLE users;  -- MySQL
+```
+
+In Postgres, l'autovacuum lancia ANALYZE automaticamente sopra una soglia di
+modifiche.
+
+## Hint (MySQL, Oracle)
+
+MySQL:
+
+```sql
+SELECT * FROM users FORCE INDEX (idx_users_email) WHERE email = ?;
+```
+
+Postgres ufficialmente non ha hint; per casi estremi: `pg_hint_plan` extension o
+riscrivere la query.
+
+## Quando l'indice **non** viene usato
+
+- WHERE su funzione non indicizzata (`UPPER`, `LOWER`).
+- Confronto con tipo diverso (`WHERE id = '42'` con `id INTEGER`).
+- `OR` su colonne diverse senza indici combinati.
+- `LIKE '%foo'` (wildcard a sinistra).
+- Bassa selettività: il planner stima che il full scan sia più rapido.

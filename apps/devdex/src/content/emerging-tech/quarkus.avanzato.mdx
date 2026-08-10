@@ -1,0 +1,74 @@
+# Quarkus — Native image e ottimizzazioni
+
+## Cosa fa GraalVM con `--native-image`
+
+1. **Closed-world assumption**: analizza staticamente tutto il codice raggiungibile da
+   `main`. Quello che non è raggiungibile a build time **non esiste** a runtime.
+2. **AOT compilation**: produce un eseguibile nativo (linux/macos/windows).
+3. **No JIT**: niente warmup, ma anche niente ottimizzazioni speculative; il throughput
+   di picco è generalmente inferiore alla JVM HotSpot.
+
+## Costo
+
+- Build time lungo (minuti).
+- Reflection / proxy / serializzazione devono essere **dichiarati**:
+
+```java
+@RegisterForReflection
+public class MyDto { ... }
+```
+
+```json
+// reflect-config.json
+[
+  { "name": "com.example.MyDto", "allDeclaredFields": true,
+    "allDeclaredMethods": true, "allDeclaredConstructors": true }
+]
+```
+
+Quarkus genera la maggior parte di questi metadata automaticamente per le sue
+estensioni. È un problema quando includi librerie "generic".
+
+## Trade-off RSS vs throughput
+
+```text
+Spring Boot JIT:   startup 3s, RSS 250MB, RPS picco 10k
+Quarkus JIT:       startup 1s, RSS 150MB, RPS picco 9k
+Quarkus native:    startup 50ms, RSS 50MB, RPS picco 7k
+```
+
+Per **serverless/scale-to-zero**, native vince. Per servizi long-running ad alto
+throughput, JIT JVM resta competitivo.
+
+## Build-time vs runtime config
+
+Quarkus distingue:
+
+- **Build-time properties**: vengono "fissate" nel binario nativo. Cambiarle richiede
+  rebuild.
+- **Runtime properties**: leggibili da env vars normali.
+
+Documentate in ogni estensione. Sorpresa: cambiare `quarkus.datasource.db-kind` non
+funziona a runtime — è build-time.
+
+## Mutiny: cancellation & backpressure
+
+`Uni`/`Multi` sono simili a Reactor ma con API più "esplicita" sui side effect.
+
+```java
+Uni<String> u = client.get().map(this::parse)
+    .onFailure().retry().atMost(3)
+    .onFailure().recoverWithItem("fallback");
+```
+
+## Continuous testing
+
+`-Dquarkus.test.continuous-testing=enabled` lancia i test ogni volta che salvi un file
+durante `quarkus:dev`. Feedback loop immediato.
+
+## Quando NON usare Quarkus
+
+- Stack già 100% Spring con team competente: il costo migrazione raramente ripaga.
+- Necessità di librerie che dipendono pesantemente da reflection runtime e non hanno
+  metadata GraalVM.
+- Hai bisogno di feature non ancora coperte da estensioni Quarkus (controlla prima).

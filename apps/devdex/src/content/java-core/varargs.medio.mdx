@@ -1,0 +1,55 @@
+# Varargs: scelte di design
+
+## È un array, davvero
+
+`String... parts` è zucchero sintattico per `String[] parts`. Significa che:
+
+- Puoi sovrascrivere `parts` (sebbene non sia carino).
+- Modifiche all'array sono visibili al chiamante se hai passato un array esplicito.
+
+```java
+public static void clear(int... xs) {
+    Arrays.fill(xs, 0);
+}
+
+int[] data = {1, 2, 3};
+clear(data);
+System.out.println(Arrays.toString(data));   // [0, 0, 0]   <-- ⚠️
+```
+
+## Passare `null`: ambiguità
+
+```java
+public static void f(Object... xs) { ... }
+
+f(null);              // ⚠️ ambiguo: null come array? o come elemento dell'array?
+f((Object) null);     // un elemento null
+f((Object[]) null);   // l'array è null
+```
+
+Il compilatore in genere emette un warning di tipo *"ambiguous null"*.
+
+## Overload + varargs
+
+Se hai sia `f(String x)` che `f(String... xs)`, una chiamata `f("a")` preferisce la
+versione **specifica** (`String x`), non quella varargs. Spesso è ciò che vuoi, ma è
+fonte di sorprese.
+
+## Cosa NON fare
+
+- Non usare varargs su API hot path quando hai sempre 0/1 argomento: stai allocando
+  un array a ogni chiamata.
+- Per costanti, preferisci `List.of(...)` invece di un metodo varargs "for fun".
+
+## @SafeVarargs
+
+Quando combini varargs con tipi generici, il compilatore non può garantire la heap
+pollution e ti dà un warning. Se sai che il tuo metodo è sicuro, annota con
+`@SafeVarargs` (solo su metodi `static`, `final` o `private`):
+
+```java
+@SafeVarargs
+public static <T> List<T> listOf(T... items) {
+    return Arrays.asList(items);
+}
+```

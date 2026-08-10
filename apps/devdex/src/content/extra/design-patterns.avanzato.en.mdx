@@ -1,0 +1,188 @@
+# Design Patterns — Advanced, anti-patterns, modern
+
+## Patterns and modern idiomatic Java
+
+Many GoF patterns were workarounds for pre-8 Java limits. Today:
+
+| GoF pattern | Modern Java solution |
+|---|---|
+| Singleton | `enum Singleton { INSTANCE; }` or DI container |
+| Strategy | Lambda / `Function<T,R>` |
+| Command | `Runnable`, `Supplier<T>` |
+| Iterator | `Stream`, `Iterable` |
+| Observer | `Flow.Publisher` / Reactor `Flux` / EventBus |
+| Visitor | Pattern matching on sealed |
+| Factory Method | Static factory + Builder |
+| Template Method | Higher-order function (pipeline) |
+| State | Sealed interface + switch pattern matching |
+
+Knowing the pattern helps recognize it; knowing the language helps express it
+naturally.
+
+## Common anti-patterns
+
+### God Object
+
+A class that does everything. Symptoms: 3000 lines, 50 dependencies.
+Fix: SRP, splitting.
+
+### Lava Flow
+
+"Fossil" code of old requirements never removed. It stays because "no one knows
+if anything uses it".
+Fix: telemetry, branch & remove.
+
+### Spaghetti
+
+Flow without structure.
+Fix: well-defined layers, incremental refactor.
+
+### Cargo Cult
+
+Applying a pattern because "that is how it is done" without understanding the
+problem.
+Example: Singleton everywhere, Factory everywhere, microservices with no reason.
+
+### Premature optimization
+
+Unreadable code chasing micro-performance.
+Fix: measure first, optimize later.
+
+### Stringly typed
+
+Everything is a `String`: `String userId, String price, String date`. Type
+errors are masked.
+Fix: strong types (`UserId`, `Money`, `LocalDate`).
+
+```java
+public record UserId(UUID value) {}   // strong type, rules out swap with OrderId
+```
+
+## Hexagonal architecture (Ports & Adapters)
+
+Domain at the center, independent. Adapters translate to the outside world.
+
+```
+┌─────────────────────────────────┐
+│        UI / Adapter             │
+├─────────────────────────────────┤
+│   Application services          │
+├─────────────────────────────────┤
+│   Domain (entities, VO)         │
+├─────────────────────────────────┤
+│   Outbound ports (interface)    │
+├─────────────────────────────────┤
+│  Adapters (DB, HTTP, broker)    │
+└─────────────────────────────────┘
+```
+
+"Ports" are interfaces defined by the domain. "Adapters" are infrastructural
+implementations.
+
+## Onion / Clean Architecture (Uncle Bob)
+
+Same idea, more layers:
+
+```
+Entities → Use cases → Interface adapters → Frameworks & drivers
+```
+
+Golden rule: dependencies always point **inward**.
+
+## CQRS
+
+Separate **command** (write) from **query** (read).
+
+```
+Command side:  Order.place()  →  EventStore
+                                       │
+                                       ▼
+Query side:    Projection (read model) ← consumes events
+```
+
+Enables:
+
+- Optimized read models (denormalized read models).
+- Independent scaling.
+
+Cost: complexity, eventual consistency between read/write.
+
+## Event Sourcing
+
+System state is the sum of events that reached it, not the final persisted state.
+
+```
+[OrderCreated, ItemAdded, ItemRemoved, ItemAdded, OrderPaid] → Order(state)
+```
+
+Benefits: full audit trail, time travel, arbitrary projections.
+Costs: complexity, event schema evolution, snapshots for performance.
+
+## Saga / Process Manager
+
+To orchestrate distributed transactions. See also the Microservices topic:
+
+- **Choreography**: each service reacts to events.
+- **Orchestration**: a central service (Temporal, Camunda) dictates the steps.
+
+## Outbox pattern
+
+To publish events atomically after a DB commit:
+
+1. Same transaction: write business + write outbox.
+2. A dispatcher reads outbox and publishes.
+
+Solves "dual write" (DB + broker) without 2PC.
+
+## Idempotent receiver
+
+A consumer that handles duplicate messages without repeated side effects.
+
+```java
+public void handle(OrderEvent e) {
+    if (!processed.tryInsert(e.id())) return;
+    apply(e);
+}
+```
+
+## Anticorruption Layer
+
+When integrating an external system with a model that is "wrong" compared to
+yours, build a layer that translates: your domain does not get "infected" by
+external oddities.
+
+## Modern specifications and architectures
+
+- **Vertical slicing**: feature by feature, not layer by layer.
+- **Modular monolith**: many well-isolated modules in a single deploy.
+- **Architectural fitness functions**: automated tests that verify
+  architectural constraints (e.g. ArchUnit for Java).
+
+```java
+@Test
+void domainDoesNotDependOnSpring() {
+    classes().that().resideInAPackage("..domain..")
+             .should().notDependOnClassesThat().resideInAPackage("org.springframework..")
+             .check(classes);
+}
+```
+
+## Useful lesser-known patterns
+
+- **Null Object**: a "null implementation" of an interface to avoid null checks.
+- **Bridge**: separate abstraction from implementation (for cartesian-product
+  variations).
+- **Memento**: save/restore state without exposing internal fields.
+- **Flyweight**: share immutable instances to save memory (`Integer.valueOf(N)`
+  caches [-128, 127]).
+
+## Typical interview questions
+
+- *"When is a Singleton justified?"*
+- *"Strategy with a lambda: advantages?"*
+- *"Pattern matching on sealed: what does it replace?"*
+- *"DTO vs Entity vs Value Object?"*
+- *"Hexagonal / Clean Architecture: the core rule?"*
+- *"CQRS: pros and cons?"*
+- *"What is the outbox pattern and why would you use it?"*
+- *"Anti-pattern: God Object, Stringly typed, Cargo Cult — definitions and fixes?"*

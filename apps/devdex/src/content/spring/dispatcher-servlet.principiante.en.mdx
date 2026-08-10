@@ -1,0 +1,97 @@
+# DispatcherServlet — The basics
+
+The `DispatcherServlet` is the **front controller** of Spring MVC. It is a
+single Servlet registered on the container (Tomcat, Jetty, Undertow) that
+intercepts every configured HTTP request (by default `/`) and routes them to
+the right controllers.
+
+```text
+HTTP request → DispatcherServlet → HandlerMapping → Controller → ViewResolver / body → response
+```
+
+## What it does, in short
+
+1. Receives the HTTP request (it is an `HttpServlet`).
+2. Looks for a **HandlerMapping** that can route the URL to a handler.
+3. Uses a **HandlerAdapter** to invoke the handler (usually a
+   `@RequestMapping` method).
+4. Converts the method arguments (PathVariable, RequestBody, ...) using
+   `HttpMessageConverter`s.
+5. Executes the method, gets a return value.
+6. Serializes the response (Jackson for JSON, view template for HTML).
+7. Handles exceptions via `HandlerExceptionResolver` / `@ControllerAdvice`.
+
+## Auto-registration in Spring Boot
+
+In Spring Boot you don't configure anything: it is auto-registered by
+`DispatcherServletAutoConfiguration`. See the `dispatcherServlet` bean.
+
+## Default mapping
+
+```text
+mapping: /
+```
+
+Means "intercept every request". Configurable:
+
+```yaml
+spring:
+  mvc:
+    servlet:
+      path: /api      # every request under /api
+```
+
+## Typical controller
+
+```java
+@RestController
+@RequestMapping("/orders")
+public class OrderController {
+
+    @GetMapping("/{id}")
+    public Order get(@PathVariable long id) { return svc.find(id); }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public Order create(@Valid @RequestBody NewOrder cmd) { return svc.place(cmd); }
+}
+```
+
+## Simplified flow
+
+```
+[Browser]
+   │ POST /orders
+   ▼
+DispatcherServlet
+   │ — asks RequestMappingHandlerMapping which method handles POST /orders
+   │ — asks RequestMappingHandlerAdapter to invoke it
+   ▼
+OrderController.create(cmd)
+   │
+   ▼
+DispatcherServlet
+   │ — serializes Order to JSON with Jackson
+   │ — writes HTTP 201
+   ▼
+[Browser]
+```
+
+## Filter vs Interceptor
+
+- **Filter** (Servlet API): lives at the container level, before the
+  DispatcherServlet. Used for security context, raw logging, gzip.
+- **Interceptor** (Spring): lives inside the DispatcherServlet, with access to
+  HandlerMapping and the model. Used for per-handler metrics, common headers.
+
+```java
+@Component
+public class TimingFilter extends OncePerRequestFilter {
+    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res,
+                                    FilterChain chain) throws IOException, ServletException {
+        long t = System.nanoTime();
+        try { chain.doFilter(req, res); }
+        finally { log.info("{} {} took {} ns", req.getMethod(), req.getRequestURI(), System.nanoTime() - t); }
+    }
+}
+```
