@@ -1,0 +1,38 @@
+{
+  "app": {
+    "title": "Easy Crypt",
+    "subtitle": "Cifra y descifra texto de forma sencilla y segura",
+    "footer": "Todo ocurre localmente en tu navegador. No se env\u00eda ning\u00fan dato."
+  },
+  "crypto": {
+    "textLabel": "Texto",
+    "passwordLabel": "Contrase\u00f1a",
+    "resultLabel": "Resultado",
+    "inputPlaceholder": "Introduce el texto a cifrar o descifrar...",
+    "passwordPlaceholder": "Introduce la contrase\u00f1a...",
+    "encrypt": "Cifrar",
+    "decrypt": "Descifrar",
+    "clear": "Limpiar",
+    "paste": "Pegar",
+    "copy": "Copiar",
+    "expand": "Expandir",
+    "collapse": "Reducir",
+    "show": "Mostrar",
+    "hide": "Ocultar",
+    "processing": "Procesando..."
+  },
+  "toast": {
+    "encryptEmpty": "Introduce texto para cifrar",
+    "decryptEmpty": "Introduce texto para descifrar",
+    "passwordEmpty": "Introduce una contrase\u00f1a",
+    "encryptSuccess": "\u00a1Texto cifrado con \u00e9xito!",
+    "encryptError": "Error durante el cifrado",
+    "decryptSuccess": "\u00a1Texto descifrado con \u00e9xito!",
+    "decryptError": "Contrase\u00f1a incorrecta o texto no v\u00e1lido",
+    "pasteSuccess": "\u00a1Texto pegado!",
+    "pasteError": "No se puede acceder al portapapeles",
+    "copyEmpty": "No hay resultado para copiar",
+    "copySuccess": "\u00a1Copiado al portapapeles!",
+    "copyError": "No se puede copiar"
+  }
+}

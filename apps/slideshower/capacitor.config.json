@@ -1,0 +1,8 @@
+{
+  "appId": "com.slideshower.app",
+  "appName": "Slideshower",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

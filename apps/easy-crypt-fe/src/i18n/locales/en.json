@@ -1,0 +1,38 @@
+{
+  "app": {
+    "title": "Easy Crypt",
+    "subtitle": "Encrypt and decrypt text easily and securely",
+    "footer": "Everything happens locally in your browser. No data is ever sent."
+  },
+  "crypto": {
+    "textLabel": "Text",
+    "passwordLabel": "Password",
+    "resultLabel": "Result",
+    "inputPlaceholder": "Enter the text to encrypt or decrypt...",
+    "passwordPlaceholder": "Enter the password...",
+    "encrypt": "Encrypt",
+    "decrypt": "Decrypt",
+    "clear": "Clear",
+    "paste": "Paste",
+    "copy": "Copy",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "show": "Show",
+    "hide": "Hide",
+    "processing": "Processing..."
+  },
+  "toast": {
+    "encryptEmpty": "Enter some text to encrypt",
+    "decryptEmpty": "Enter some text to decrypt",
+    "passwordEmpty": "Enter a password",
+    "encryptSuccess": "Text encrypted successfully!",
+    "encryptError": "Error during encryption",
+    "decryptSuccess": "Text decrypted successfully!",
+    "decryptError": "Wrong password or invalid text",
+    "pasteSuccess": "Text pasted!",
+    "pasteError": "Unable to access clipboard",
+    "copyEmpty": "No result to copy",
+    "copySuccess": "Copied to clipboard!",
+    "copyError": "Unable to copy"
+  }
+}

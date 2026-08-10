@@ -1,0 +1,38 @@
+{
+  "app": {
+    "title": "Easy Crypt",
+    "subtitle": "Chiffrez et d\u00e9chiffrez du texte simplement et en toute s\u00e9curit\u00e9",
+    "footer": "Tout se passe localement dans votre navigateur. Aucune donn\u00e9e n'est envoy\u00e9e."
+  },
+  "crypto": {
+    "textLabel": "Texte",
+    "passwordLabel": "Mot de passe",
+    "resultLabel": "R\u00e9sultat",
+    "inputPlaceholder": "Entrez le texte \u00e0 chiffrer ou d\u00e9chiffrer...",
+    "passwordPlaceholder": "Entrez le mot de passe...",
+    "encrypt": "Chiffrer",
+    "decrypt": "D\u00e9chiffrer",
+    "clear": "Effacer",
+    "paste": "Coller",
+    "copy": "Copier",
+    "expand": "Agrandir",
+    "collapse": "R\u00e9duire",
+    "show": "Afficher",
+    "hide": "Masquer",
+    "processing": "Traitement..."
+  },
+  "toast": {
+    "encryptEmpty": "Entrez du texte \u00e0 chiffrer",
+    "decryptEmpty": "Entrez du texte \u00e0 d\u00e9chiffrer",
+    "passwordEmpty": "Entrez un mot de passe",
+    "encryptSuccess": "Texte chiffr\u00e9 avec succ\u00e8s !",
+    "encryptError": "Erreur lors du chiffrement",
+    "decryptSuccess": "Texte d\u00e9chiffr\u00e9 avec succ\u00e8s !",
+    "decryptError": "Mot de passe incorrect ou texte invalide",
+    "pasteSuccess": "Texte coll\u00e9 !",
+    "pasteError": "Impossible d'acc\u00e9der au presse-papiers",
+    "copyEmpty": "Aucun r\u00e9sultat \u00e0 copier",
+    "copySuccess": "Copi\u00e9 dans le presse-papiers !",
+    "copyError": "Impossible de copier"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "app": {
+    "title": "Easy Crypt",
+    "subtitle": "Cripta e decripta testo in modo semplice e sicuro",
+    "footer": "Tutto avviene localmente nel tuo browser. Nessun dato viene inviato."
+  },
+  "crypto": {
+    "textLabel": "Testo",
+    "passwordLabel": "Password",
+    "resultLabel": "Risultato",
+    "inputPlaceholder": "Inserisci il testo da criptare o decriptare...",
+    "passwordPlaceholder": "Inserisci la password...",
+    "encrypt": "Cripta",
+    "decrypt": "Decripta",
+    "clear": "Pulisci",
+    "paste": "Incolla",
+    "copy": "Copia",
+    "expand": "Espandi",
+    "collapse": "Riduci",
+    "show": "Mostra",
+    "hide": "Nascondi",
+    "processing": "Elaborazione..."
+  },
+  "toast": {
+    "encryptEmpty": "Inserisci del testo da criptare",
+    "decryptEmpty": "Inserisci del testo da decriptare",
+    "passwordEmpty": "Inserisci una password",
+    "encryptSuccess": "Testo criptato con successo!",
+    "encryptError": "Errore durante la crittografia",
+    "decryptSuccess": "Testo decriptato con successo!",
+    "decryptError": "Password errata o testo non valido",
+    "pasteSuccess": "Testo incollato!",
+    "pasteError": "Impossibile accedere agli appunti",
+    "copyEmpty": "Nessun risultato da copiare",
+    "copySuccess": "Copiato negli appunti!",
+    "copyError": "Impossibile copiare"
+  }
+}

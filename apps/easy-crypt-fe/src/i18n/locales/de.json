@@ -1,0 +1,38 @@
+{
+  "app": {
+    "title": "Easy Crypt",
+    "subtitle": "Text einfach und sicher verschl\u00fcsseln und entschl\u00fcsseln",
+    "footer": "Alles geschieht lokal in deinem Browser. Es werden keine Daten gesendet."
+  },
+  "crypto": {
+    "textLabel": "Text",
+    "passwordLabel": "Passwort",
+    "resultLabel": "Ergebnis",
+    "inputPlaceholder": "Text zum Verschl\u00fcsseln oder Entschl\u00fcsseln eingeben...",
+    "passwordPlaceholder": "Passwort eingeben...",
+    "encrypt": "Verschl\u00fcsseln",
+    "decrypt": "Entschl\u00fcsseln",
+    "clear": "L\u00f6schen",
+    "paste": "Einf\u00fcgen",
+    "copy": "Kopieren",
+    "expand": "Erweitern",
+    "collapse": "Reduzieren",
+    "show": "Anzeigen",
+    "hide": "Verbergen",
+    "processing": "Verarbeitung..."
+  },
+  "toast": {
+    "encryptEmpty": "Gib einen Text zum Verschl\u00fcsseln ein",
+    "decryptEmpty": "Gib einen Text zum Entschl\u00fcsseln ein",
+    "passwordEmpty": "Gib ein Passwort ein",
+    "encryptSuccess": "Text erfolgreich verschl\u00fcsselt!",
+    "encryptError": "Fehler bei der Verschl\u00fcsselung",
+    "decryptSuccess": "Text erfolgreich entschl\u00fcsselt!",
+    "decryptError": "Falsches Passwort oder ung\u00fcltiger Text",
+    "pasteSuccess": "Text eingef\u00fcgt!",
+    "pasteError": "Kein Zugriff auf die Zwischenablage",
+    "copyEmpty": "Kein Ergebnis zum Kopieren",
+    "copySuccess": "In die Zwischenablage kopiert!",
+    "copyError": "Kopieren nicht m\u00f6glich"
+  }
+}
