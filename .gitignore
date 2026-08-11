@@ -144,4 +144,5 @@ vite.config.ts.timestamp-*
 
 # Local Cloudflare/Vinext runtime state
 .wrangler/
+.netlify/
 .DS_Store

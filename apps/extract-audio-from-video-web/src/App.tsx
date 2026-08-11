@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { FFmpeg, FFFSType } from '@ffmpeg/ffmpeg';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import type { FFFSType } from '@ffmpeg/ffmpeg';
 import ffmpegCoreUrl from './vendor/ffmpeg-core/ffmpeg-core.js?url';
 import ffmpegWasmUrl from './vendor/ffmpeg-core/ffmpeg-core.wasm?url';
 
@@ -151,7 +152,7 @@ export default function App({ logoSrc = '/logo.png' }: { logoSrc?: string }) {
 
       try {
         await ffmpeg.createDir(mountPoint);
-        await ffmpeg.mount(FFFSType.WORKERFS, { files: [file] }, mountPoint);
+        await ffmpeg.mount('WORKERFS' as FFFSType, { files: [file] }, mountPoint);
         inputMounted = true;
 
         const exitCode = await ffmpeg.exec([
