@@ -10,6 +10,8 @@
 
 * {
   box-sizing: border-box;
+  /* Evita il flash blu predefinito di Android senza toccare :focus-visible. */
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
